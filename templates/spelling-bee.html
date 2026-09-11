@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>Spelling Bee &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'media' }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: manipulation;
+        }
+        body { background: #f1f5f9; }
+        @media (prefers-color-scheme: dark) { body { background: #1c1c1e; } }
+
+        #page { height: 100vh; height: 100dvh; }
+
+        /* ---- Word input row & Blinking Cursor ---- */
+        #word-display {
+            min-height: 2.4rem;
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: #0f172a;
+        }
+        @media (prefers-color-scheme: dark) { #word-display { color: #f1f5f9; } }
+        #word-display .center-letter { color: #f5b800; }
+        @media (prefers-color-scheme: dark) { #word-display .center-letter { color: #f7da21; } }
+
+        .blinking-cursor {
+            display: inline-block;
+            width: 2.5px;
+            height: 1.7rem;
+            background-color: #f5b800;
+            margin-left: 2px;
+            vertical-align: middle;
+            animation: blink 1s step-end infinite;
+        }
+        @media (prefers-color-scheme: dark) {
+            .blinking-cursor { background-color: #f7da21; }
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        #word-display.shake { animation: shake 0.5s ease-in-out; }
+        @keyframes shake {
+            10%, 90% { transform: translateX(-1px); }
+            20%, 80% { transform: translateX(2px); }
+            30%, 50%, 70% { transform: translateX(-4px); }
+            40%, 60% { transform: translateX(4px); }
+        }
+
+        /* ---- Hive ---- */
+        #hive {
+            position: relative;
+            width: 280px;
+            height: 260px;
+            margin: 0 auto;
+            flex-shrink: 0;
+        }
+        .hex-btn {
+            position: absolute;
+            width: 99px;
+            aspect-ratio: 2 / 1.732;
+            top: 50%;
+            left: 50%;
+            clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            border: none;
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #e6e8ea;
+            color: #1c1c1e;
+            transition: transform 0.12s ease, background-color 0.5s ease;
+        }
+        @media (prefers-color-scheme: dark) {
+            .hex-btn { background-color: #3a3a3c; color: #f1f5f9; }
+        }
+        .hex-btn:active { transform: translate(-50%, -50%) scale(0.94); }
+        .hex-btn.center {
+            background-color: #f7da21;
+            color: #1c1c1e;
+            z-index: 2;
+        }
+        .hex-btn.pulse { animation: pulse 0.35s ease; }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(0.8); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+        .hex-btn.shuffling { transition: top 0.35s ease, left 0.35s ease; }
+
+        /* ---- Control buttons ---- */
+        .ctrl-btn {
+            border: 2px solid #d1d5db;
+            border-radius: 9999px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 0.65rem 1.1rem;
+            background: transparent;
+            color: #334155;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @media (prefers-color-scheme: dark) {
+            .ctrl-btn { border-color: #52525b; color: #e2e8f0; }
+        }
+        .ctrl-btn:active { background-color: rgba(148,163,184,0.25); }
+        .ctrl-btn.enter { padding: 0.65rem 1.5rem; }
+
+        /* ---- Progress bar (rank track with a score bubble + dots) ---- */
+        #progress-track {
+            position: relative;
+            height: 28px;
+            flex: 1;
+        }
+        .progress-line {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #d1d5db;
+            transform: translateY(-50%);
+        }
+        @media (prefers-color-scheme: dark) { .progress-line { background: #52525b; } }
+
+        .rank-node {
+            position: absolute;
+            top: 50%;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #d1d5db;
+            transform: translate(-50%, -50%);
+        }
+        @media (prefers-color-scheme: dark) { .rank-node { background: #52525b; } }
+        .rank-node.reached { background: #f5b800; }
+        .rank-node.square { border-radius: 2px; }
+
+        .score-marker {
+            position: absolute;
+            top: 50%;
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            background: #f7da21;
+            color: #1c1c1e;
+            font-weight: 800;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+            z-index: 3;
+            transition: left 0.4s ease;
+        }
+
+        #toast-container {
+            position: fixed;
+            top: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9000;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.92);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+            animation: fadeInOut 1.6s forwards;
+            white-space: nowrap;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            15% { opacity: 1; transform: translateY(0); }
+            80% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="toast-container"></div>
+
+    <!-- Rankings Modal -->
+    <div id="rankings-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
+        <div class="bg-[#1c1c1e] text-white rounded-3xl p-6 max-w-sm w-full max-h-[90vh] flex flex-col shadow-2xl relative border border-neutral-800">
+            <button onclick="closeRankingsModal()" class="absolute top-4 right-4 text-neutral-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
+            <h2 class="text-2xl font-black mb-1">Rankings</h2>
+            <p class="text-xs text-neutral-400 mb-5">Ranks are based on a percentage of possible points in a puzzle.</p>
+
+            <div class="flex justify-between text-xs font-bold text-neutral-400 px-3 mb-2">
+                <span>Rank</span>
+                <span>Minimum score</span>
+            </div>
+
+            <div id="rankings-list" class="overflow-y-auto flex-1 space-y-1 my-1 pr-1"></div>
+        </div>
+    </div>
+
+    <!-- Genius / Queen Bee celebration modal -->
+    <div id="result-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl border border-slate-100 dark:border-neutral-700">
+            <div id="modal-emoji" class="text-5xl mb-3">🐝</div>
+            <h2 id="modal-title" class="text-2xl font-black text-slate-900 dark:text-white mb-1">Genius!</h2>
+            <p id="modal-subtitle" class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">You're crushing it.</p>
+            <div class="bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl p-4 mb-6">
+                <div class="flex items-center justify-center gap-1.5 text-slate-600 dark:text-neutral-400 text-sm font-semibold">
+                    <span>Score:</span>
+                    <span id="modal-score" class="font-mono text-slate-900 dark:text-white">0</span>
+                </div>
+            </div>
+            <button onclick="closeResultModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition active:scale-95 shadow-md">
+                Keep Playing
+            </button>
+        </div>
+    </div>
+
+    <div id="page" class="max-w-6xl mx-auto bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-screen">
+
+        <!-- Header -->
+        <header class="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-neutral-700 shrink-0"
+                 style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+            <button onclick="goBack()"
+                    aria-label="Back"
+                    class="text-slate-700 dark:text-neutral-300 hover:text-black dark:hover:text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-neutral-800 transition">
+                &#8249;
+            </button>
+            <div class="flex-1 min-w-0">
+                <p class="font-semibold text-slate-900 dark:text-white truncate text-sm">Spelling Bee</p>
+                <p id="puzzle-date" class="text-xs text-slate-500 dark:text-neutral-400 truncate"></p>
+            </div>
+            <button onclick="toggleWordlist()" id="score-badge" class="font-mono font-bold text-sm text-slate-700 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800 px-2.5 py-1 rounded-md border border-slate-200 dark:border-neutral-700 select-none">
+                0 pts
+            </button>
+        </header>
+
+        {% if puzzle_unavailable %}
+        <div class="flex-1 flex items-center justify-center p-6">
+            <div class="text-center max-w-sm">
+                <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
+                <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or doesn't have a Spelling Bee puzzle yet.</p>
+            </div>
+        </div>
+        {% else %}
+
+        <!-- Rank / progress bar (clickable to show Rankings modal) -->
+        <div onclick="openRankingsModal()" class="px-4 pt-3 shrink-0 flex items-center gap-3 cursor-pointer select-none">
+            <span id="rank-label" class="text-sm font-bold text-slate-900 dark:text-white shrink-0">Beginner</span>
+            <div id="progress-track"></div>
+        </div>
+
+        <!-- Top Found-words container (Placed below progress bar) -->
+        <div class="px-4 pt-2.5 shrink-0">
+            <div onclick="toggleWordlist()" class="flex items-center justify-between py-1.5 px-3 bg-slate-100 dark:bg-neutral-800 rounded-lg cursor-pointer border border-slate-200 dark:border-neutral-700 select-none min-w-0">
+                <span id="found-count-label" class="text-xs font-semibold text-slate-700 dark:text-neutral-300 truncate pr-2">0 Words Found</span>
+                <span id="found-chevron" class="text-xs text-slate-500 dark:text-neutral-400 transform transition-transform duration-200 shrink-0">▼</span>
+            </div>
+            <div id="wordlist-panel" class="hidden mt-2 p-3 bg-slate-50 dark:bg-neutral-900 border border-slate-200 dark:border-neutral-700 rounded-lg max-h-36 overflow-y-auto">
+                <div id="found-words-grid" class="text-xs text-slate-700 dark:text-neutral-300 leading-relaxed"></div>
+            </div>
+        </div>
+
+        <!-- Word display -->
+        <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 px-4">
+            <div id="word-display" class="text-center min-h-[2.4rem] flex items-center justify-center"></div>
+
+            <div id="hive"></div>
+
+            <div class="flex items-center justify-center gap-3">
+                <button class="ctrl-btn" onclick="handleAction('DEL')">Delete</button>
+                <button class="ctrl-btn" id="shuffle-btn" onclick="handleAction('SHUFFLE')" aria-label="Shuffle">&#8635;</button>
+                <button class="ctrl-btn enter" onclick="handleAction('ENTER')">Enter</button>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script id="bee-meta" type="application/json">
+        {{ {"year": year, "month": month, "day": day} | tojson }}
+    </script>
+
+    {% if not puzzle_unavailable %}
+    <script id="bee-puzzle" type="application/json">
+        {{ puzzle | tojson }}
+    </script>
+    <script>
+        function goBack() {
+            const params = new URLSearchParams(window.location.search);
+            const back = params.get('back');
+            window.location.href = back ? decodeURIComponent(back) : '/';
+        }
+
+        const meta = JSON.parse(document.getElementById('bee-meta').textContent);
+        const PUZZLE = JSON.parse(document.getElementById('bee-puzzle').textContent);
+
+        const CENTER = PUZZLE.center_letter.toUpperCase();
+        const OUTER = PUZZLE.outer_letters.map(l => l.toUpperCase());
+        const ALL_LETTERS = new Set([CENTER, ...OUTER]);
+        const ANSWERS = new Set(PUZZLE.answers.map(w => w.toUpperCase()));
+        const MAX_POINTS = PUZZLE.max_points;
+
+        const RANKS = [
+            { name: "Beginner",   pct: 0.00 },
+            { name: "Good Start", pct: 0.02 },
+            { name: "Moving Up",  pct: 0.05 },
+            { name: "Good",       pct: 0.08 },
+            { name: "Solid",      pct: 0.15 },
+            { name: "Nice",       pct: 0.25 },
+            { name: "Great",      pct: 0.40 },
+            { name: "Amazing",    pct: 0.50 },
+            { name: "Genius",     pct: 0.70 },
+            { name: "Queen Bee",  pct: 1.00 },
+        ];
+
+        let currentWord = "";
+        let foundWords = [];   // array of found words (uppercase, chronological order)
+        let score = 0;
+        let celebratedRank = "Beginner"; // last rank we already showed a modal for
+
+        let clearOnNextInput = false;
+        let wrongWordTimer = null;
+
+        function isPangram(word) {
+            return ALL_LETTERS.size === new Set(word.split("")).size &&
+                   [...ALL_LETTERS].every(l => word.includes(l));
+        }
+
+        function scoreForWord(word) {
+            if (word.length === 4) return 1;
+            let pts = word.length;
+            if (isPangram(word)) pts += 7;
+            return pts;
+        }
+
+        // --- Date label ---
+        (function renderDateLabel() {
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            document.getElementById('puzzle-date').textContent =
+                d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        })();
+
+        // --- Build the hive ---
+        const hive = document.getElementById('hive');
+        const RADIUS = 92;
+
+        function layoutPositions() {
+            const positions = [{ x: 0, y: 0 }];
+            for (let i = 0; i < 6; i++) {
+                const angle = (Math.PI / 3) * i - Math.PI / 2;
+                positions.push({ x: RADIUS * Math.cos(angle), y: RADIUS * Math.sin(angle) });
+            }
+            return positions;
+        }
+
+        let hexEls = [];
+        function buildHive() {
+            hive.innerHTML = "";
+            hexEls = [];
+            const positions = layoutPositions();
+            const letters = [CENTER, ...OUTER];
+            letters.forEach((letter, i) => {
+                const btn = document.createElement("button");
+                btn.className = "hex-btn" + (i === 0 ? " center" : "");
+                btn.textContent = letter;
+                btn.dataset.letter = letter;
+                btn.style.left = `calc(50% + ${positions[i].x}px)`;
+                btn.style.top = `calc(50% + ${positions[i].y}px)`;
+                btn.style.transform = "translate(-50%, -50%)";
+                btn.onclick = () => addLetter(letter, btn);
+                hive.appendChild(btn);
+                hexEls.push(btn);
+            });
+        }
+        buildHive();
+
+        // Clear wrong word if pending
+        function clearBadWordIfNeeded() {
+            if (clearOnNextInput) {
+                if (wrongWordTimer) clearTimeout(wrongWordTimer);
+                currentWord = "";
+                clearOnNextInput = false;
+                renderWord();
+            }
+        }
+
+        // Render current word with blinking cursor
+        function renderWord() {
+            const disp = document.getElementById('word-display');
+            const letters = currentWord.split("").map(ch =>
+                ch === CENTER ? `<span class="center-letter">${ch}</span>` : ch
+            ).join("");
+            disp.innerHTML = letters + `<span class="blinking-cursor"></span>`;
+        }
+
+        function addLetter(letter, btnEl) {
+            clearBadWordIfNeeded();
+            currentWord += letter;
+            renderWord();
+            if (btnEl) {
+                btnEl.classList.remove("pulse");
+                void btnEl.offsetWidth;
+                btnEl.classList.add("pulse");
+            }
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 1600);
+        }
+
+        function shakeWord() {
+            const disp = document.getElementById('word-display');
+            disp.classList.remove('shake');
+            void disp.offsetWidth;
+            disp.classList.add('shake');
+        }
+
+        function handleWrongWord(msg) {
+            shakeWord();
+            showToast(msg);
+            clearOnNextInput = true;
+            if (wrongWordTimer) clearTimeout(wrongWordTimer);
+            wrongWordTimer = setTimeout(() => {
+                clearBadWordIfNeeded();
+            }, 600);
+        }
+
+        function shuffleLetters() {
+            for (let i = OUTER.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [OUTER[i], OUTER[j]] = [OUTER[j], OUTER[i]];
+            }
+            const positions = layoutPositions();
+            hexEls.forEach(el => el.classList.add("shuffling"));
+            [CENTER, ...OUTER].forEach((letter, i) => {
+                hexEls[i].textContent = letter;
+                hexEls[i].style.left = `calc(50% + ${positions[i].x}px)`;
+                hexEls[i].style.top = `calc(50% + ${positions[i].y}px)`;
+            });
+        }
+
+        function submitWord() {
+            clearBadWordIfNeeded();
+            if (currentWord.length === 0) return;
+
+            if (currentWord.length < 4) {
+                handleWrongWord("Too short"); return;
+            }
+            if (!currentWord.includes(CENTER)) {
+                handleWrongWord("Missing center letter"); return;
+            }
+            if ([...currentWord].some(ch => !ALL_LETTERS.has(ch))) {
+                handleWrongWord("Bad letters"); return;
+            }
+            if (foundWords.includes(currentWord)) {
+                handleWrongWord("Already found"); return;
+            }
+            if (!ANSWERS.has(currentWord)) {
+                handleWrongWord("Not in word list"); return;
+            }
+
+            const word = currentWord;
+            currentWord = "";
+            renderWord();
+
+            const pts = scoreForWord(word);
+            score += pts;
+            foundWords.push(word); // Keep chronological order (recent words appended)
+
+            if (isPangram(word)) {
+                showToast(`Pangram! +${pts}`);
+            } else {
+                showToast(`+${pts} point${pts === 1 ? "" : "s"}`);
+            }
+
+            renderScore();
+            renderWordlist();
+            saveProgress();
+            checkRankCelebration();
+        }
+
+        function handleAction(action) {
+            if (action === "DEL") {
+                if (clearOnNextInput) {
+                    clearBadWordIfNeeded();
+                } else {
+                    currentWord = currentWord.slice(0, -1);
+                    renderWord();
+                }
+            } else if (action === "ENTER") {
+                submitWord();
+            } else if (action === "SHUFFLE") {
+                shuffleLetters();
+            }
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { handleAction("ENTER"); return; }
+            if (e.key === "Backspace") { handleAction("DEL"); return; }
+            if (e.key === " ") { e.preventDefault(); handleAction("SHUFFLE"); return; }
+            if (/^[a-zA-Z]$/.test(e.key)) {
+                const letter = e.key.toUpperCase();
+                if (ALL_LETTERS.has(letter)) {
+                    const btn = hexEls.find(el => el.dataset.letter === letter);
+                    addLetter(letter, btn);
+                }
+            }
+        });
+
+        // --- Rank / progress ---
+        function currentRankIndex() {
+            let idx = 0;
+            for (let i = 0; i < RANKS.length; i++) {
+                if (score >= RANKS[i].pct * MAX_POINTS) idx = i;
+            }
+            return idx;
+        }
+
+        function renderScore() {
+            document.getElementById('score-badge').textContent = `${score} pts`;
+
+            const idx = currentRankIndex();
+            const rank = RANKS[idx];
+            document.getElementById('rank-label').textContent = rank.name;
+
+            renderProgressTrack(idx);
+        }
+
+        function renderProgressTrack(idx) {
+            const track = document.getElementById('progress-track');
+            track.innerHTML = '<div class="progress-line"></div>';
+
+            // Progress bar farthest point is Genius (70% of max points)
+            const geniusPct = RANKS.find(r => r.name === "Genius").pct;
+            const geniusScore = Math.round(MAX_POINTS * geniusPct);
+
+            const displayRanks = RANKS.filter(r => r.pct <= geniusPct);
+
+            displayRanks.forEach((r, i) => {
+                if (i === 0) return; // Beginner sits at start
+                const node = document.createElement('div');
+                const isLast = r.name === "Genius";
+                node.className = 'rank-node' + (isLast ? ' square' : '') + (i <= idx ? ' reached' : '');
+
+                // Scale positions relative to Genius (Genius = 100%)
+                const posPct = (r.pct / geniusPct) * 100;
+                node.style.left = `${posPct}%`;
+                track.appendChild(node);
+            });
+
+            // Smooth progress marker calculated relative to Genius score
+            const exactPct = Math.min(100, Math.max(0, (score / geniusScore) * 100));
+
+            const marker = document.createElement('div');
+            marker.className = 'score-marker';
+            marker.style.left = `${exactPct}%`;
+            marker.textContent = score;
+            track.appendChild(marker);
+        }
+
+        // --- Rankings Modal (Hides Queen Bee) ---
+        function renderRankingsModal() {
+            const listEl = document.getElementById('rankings-list');
+            const currentIdx = currentRankIndex();
+            const geniusPct = RANKS.find(r => r.name === "Genius").pct;
+            const geniusScore = Math.round(MAX_POINTS * geniusPct);
+
+            // Filter out Queen Bee from rankings popup
+            const ranksToDisplay = RANKS.filter(r => r.name !== "Queen Bee");
+            const reversedRanks = ranksToDisplay.map(r => ({
+                ...r,
+                originalIdx: RANKS.findIndex(x => x.name === r.name)
+            })).reverse();
+
+            listEl.innerHTML = reversedRanks.map(r => {
+                const minScore = Math.round(MAX_POINTS * r.pct);
+                const isCurrent = r.originalIdx === currentIdx;
+
+                if (isCurrent) {
+                    let nextInfo = "";
+                    if (currentIdx < RANKS.length - 1) {
+                        const nextMin = Math.round(MAX_POINTS * RANKS[currentIdx + 1].pct);
+                        const ptsToNext = nextMin - score;
+                        const ptsToGenius = geniusScore - score;
+
+                        if (r.name === "Genius") {
+                            nextInfo = `Genius reached!`;
+                        } else {
+                            nextInfo = `${ptsToNext} point${ptsToNext === 1 ? '' : 's'} to next rank, ${Math.max(0, ptsToGenius)} to Genius`;
+                        }
+                    } else {
+                        nextInfo = `Queen Bee achieved!`;
+                    }
+
+                    return `
+                        <div class="bg-[#f7da21] text-black rounded-2xl p-3 flex flex-col my-1 shadow-md">
+                            <div class="flex items-center justify-between font-bold text-sm">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3.5 h-3.5 bg-black rounded-full inline-block"></span>
+                                    <span class="font-bold text-base">${r.name}</span>
+                                </div>
+                                <span class="font-mono text-base font-bold">${minScore}</span>
+                            </div>
+                            <div class="text-[11px] font-semibold text-neutral-800 mt-1 pl-5">
+                                ${nextInfo}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="flex items-center justify-between py-2 px-3 text-sm font-medium text-neutral-300 border-l-2 border-neutral-700 ml-1.5 pl-4">
+                            <span>${r.name}</span>
+                            <span class="font-mono text-neutral-400">${minScore}</span>
+                        </div>
+                    `;
+                }
+            }).join("");
+        }
+
+        function openRankingsModal() {
+            renderRankingsModal();
+            document.getElementById('rankings-modal').classList.remove('hidden');
+        }
+
+        function closeRankingsModal() {
+            document.getElementById('rankings-modal').classList.add('hidden');
+        }
+
+        function checkRankCelebration() {
+            const idx = currentRankIndex();
+            const rank = RANKS[idx];
+            if ((rank.name === "Genius" || rank.name === "Queen Bee") && celebratedRank !== rank.name) {
+                celebratedRank = rank.name;
+                document.getElementById('modal-emoji').textContent = rank.name === "Queen Bee" ? "👑" : "🐝";
+                document.getElementById('modal-title').textContent = rank.name + "!";
+                document.getElementById('modal-subtitle').textContent = rank.name === "Queen Bee"
+                    ? "You found every word. Incredible."
+                    : "You're crushing it.";
+                document.getElementById('modal-score').textContent = score;
+                document.getElementById('result-modal').classList.remove('hidden');
+            }
+        }
+
+        function closeResultModal() {
+            document.getElementById('result-modal').classList.add('hidden');
+        }
+
+        // --- Found words panel & Most Recently Found Preview ---
+        function renderWordlist() {
+            const labelEl = document.getElementById('found-count-label');
+
+            // Reverse so most recently found words appear first
+            const recentWords = [...foundWords].reverse();
+
+            if (recentWords.length === 0) {
+                labelEl.textContent = "0 Words Found";
+            } else {
+                const lowerWords = recentWords.map(w => w.toLowerCase());
+                labelEl.textContent = lowerWords.join(", ");
+            }
+
+            const grid = document.getElementById('found-words-grid');
+            if (recentWords.length === 0) {
+                grid.innerHTML = `<p class="text-slate-400 dark:text-neutral-500 font-medium italic">Words you find will appear here.</p>`;
+                return;
+            }
+
+            grid.innerHTML = recentWords.map(w =>
+                `<span class="inline-block font-semibold py-0.5 text-slate-800 dark:text-neutral-200 capitalize">${w.toLowerCase()}${isPangram(w) ? ' <span class="text-amber-500">&#9733;</span>' : ''}</span>`
+            ).join('<span class="text-slate-300 dark:text-neutral-600 mx-1.5">•</span>');
+        }
+
+        function toggleWordlist() {
+            const panel = document.getElementById('wordlist-panel');
+            const chevron = document.getElementById('found-chevron');
+            panel.classList.toggle('hidden');
+            if (chevron) {
+                chevron.classList.toggle('rotate-180');
+            }
+        }
+
+        // --- Progress persistence ---
+        function saveProgress() {
+            const saveUrl = `/api/progress/SpellingBee/${meta.year}/${meta.month}/${meta.day}`;
+            fetch(saveUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userGrid: { foundWords: foundWords },
+                    timerSeconds: score,               // repurposed: current score
+                    ratio: Math.min(1, score / MAX_POINTS),
+                    completed: score >= MAX_POINTS,
+                    usedCheck: celebratedRank === "Queen Bee"
+                })
+            }).catch(e => console.error("Error saving progress:", e));
+        }
+
+        function loadProgress() {
+            const loadUrl = `/api/progress/SpellingBee/${meta.year}/${meta.month}/${meta.day}`;
+            fetch(loadUrl).then(r => r.json()).then(saved => {
+                if (saved && saved.userGrid && Array.isArray(saved.userGrid.foundWords)) {
+                    foundWords = saved.userGrid.foundWords.filter(w => ANSWERS.has(w));
+                    score = foundWords.reduce((sum, w) => sum + scoreForWord(w), 0);
+                    if (score >= RANKS.find(r => r.name === "Queen Bee").pct * MAX_POINTS) celebratedRank = "Queen Bee";
+                    else if (score >= RANKS.find(r => r.name === "Genius").pct * MAX_POINTS) celebratedRank = "Genius";
+                }
+                renderScore();
+                renderWordlist();
+            }).catch(e => console.error("Error loading progress:", e));
+        }
+
+        renderWord();
+        renderScore();
+        renderWordlist();
+        loadProgress();
+    </script>
+    {% endif %}
+</body>
+</html>

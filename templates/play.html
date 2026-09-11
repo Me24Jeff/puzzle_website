@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>{{ publisher }} &middot; {{ year }}-{{ month }}-{{ day_key }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'media'
+        }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: manipulation;
+        }
+        body { background: #f1f5f9; }
+        @media (prefers-color-scheme: dark) {
+            body { background: #1c1c1e; }
+        }
+
+        #page {
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        #grid-wrapper {
+            touch-action: pan-x pan-y;
+            display: flex;
+            overflow: auto;
+            will-change: scroll-position;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE / Edge */
+        }
+
+        /* Hide scrollbars in Chrome, Safari, and Edge */
+        #grid-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+
+        #grid-container {
+            margin: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: min-content;
+            min-height: min-content;
+            padding: 1rem;
+        }
+
+        #grid {
+            display: grid;
+            border-top: 2px solid #111;
+            border-left: 2px solid #111;
+            border-right: 1px solid #111;
+            border-bottom: 1px solid #111;
+            background: #111;
+            gap: 0;
+            container-type: inline-size;
+            box-sizing: border-box;
+            will-change: width, height;
+        }
+        .cw-cell {
+            position: relative;
+            background: white;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: calc(60cqw / var(--cw-cols, 15));
+            color: #111;
+            cursor: pointer;
+            user-select: none;
+            overflow: hidden;
+            box-sizing: border-box;
+            border-right: 1px solid #111;
+            border-bottom: 1px solid #111;
+        }
+        .cw-cell.block { background: #111; cursor: default; border-color: #111; }
+        .cw-cell.in-word { background: #a9d8f5; }
+        .cw-cell.current { background: #fbd94a; }
+        .cw-cell .num {
+            position: absolute; top: 1px; left: 2px;
+            font-size: 0.32em; font-weight: 600; color: #333;
+            line-height: 1;
+        }
+        .cw-cell .circle {
+            position: absolute; inset: 8%;
+            border: 1.5px solid #666; border-radius: 50%;
+            pointer-events: none;
+        }
+        .cw-cell .letter {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        .cw-cell.pencil-letter .letter { color: #9ca3af; }
+        .cw-cell.correct-letter .letter { color: #2563eb; }
+        .cw-cell.wrong-letter .letter { color: #111; }
+        .cw-cell.wrong-letter::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(to top right, transparent calc(50% - 1.5px), #dc2626 50%, transparent calc(50% + 1.5px));
+            pointer-events: none;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .cw-cell { background: #2b2b2e; color: #f1f5f9; }
+            .cw-cell.in-word { background: #6C8A9E; }
+            .cw-cell.current { background: #C9AC36; }
+            .cw-cell .num { color: #9ca3af; }
+            .cw-cell .circle { border-color: #9ca3af; }
+            .cw-cell.wrong-letter .letter { color: #f1f5f9; }
+            .cw-cell.pencil-letter .letter { color: #71717a; }
+            #clue-bar { background: #6C8A9E !important; }
+            #clue-bar, #clue-bar #clue-text, #clue-bar > div { color: #f1f5f9 !important; }
+        }
+
+        .kb-key {
+            flex: 1 1 0;
+            padding: 12px 0;
+            margin: 2px;
+            border-radius: 6px;
+            background: white;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            text-align: center;
+            font-weight: 600;
+            font-size: 16px;
+            user-select: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .kb-key:active { background: #cbd5e1; }
+        .kb-key.func-key { background: #cbd5e1; color: #0f172a; }
+        .kb-key.active-toggle { background: #111; color: white; }
+        .toolbtn.active { background: #111; color: white; }
+
+        @media (prefers-color-scheme: dark) {
+            #keyboard { background: #262626; }
+            .kb-key { background: #3f3f46; color: #f1f5f9; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+            .kb-key:active { background: #52525b; }
+            .kb-key.func-key { background: #52525b; color: #f1f5f9; }
+            .kb-key.active-toggle { background: #2563eb; color: white; }
+            .toolbtn.active { background: #2563eb; color: white; }
+        }
+
+        #key-popover {
+            position: fixed;
+            display: none;
+            background: white;
+            color: #111;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            padding: 8px 14px;
+            font-size: 24px;
+            font-weight: 700;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -100%);
+        }
+        @media (prefers-color-scheme: dark) {
+            #key-popover { background: #3f3f46; color: #f1f5f9; border-color: #52525b; }
+        }
+
+        #toast-container {
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9000;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+            animation: fadeInOut 2.5s forwards;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            15% { opacity: 1; transform: translateY(0); }
+            85% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="key-popover"></div>
+    <div id="toast-container"></div>
+
+    <!-- Victory Modal -->
+    <div id="victory-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl transform transition-all border border-slate-100 dark:border-neutral-700">
+            <div class="text-5xl mb-3">🎉</div>
+            <h2 class="text-2xl font-black text-slate-900 dark:text-white mb-1">Congrats!</h2>
+            <p class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">You finished the puzzle!</p>
+
+            <div class="bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl p-4 mb-6">
+                <p id="modal-puzzle-title" class="font-bold text-slate-800 dark:text-slate-100 text-base mb-1 truncate">&nbsp;</p>
+                <div class="flex items-center justify-center gap-1.5 text-slate-600 dark:text-neutral-400 text-sm font-semibold">
+                    <span>⏱️ Time:</span>
+                    <span id="modal-completion-time" class="font-mono text-slate-900 dark:text-white">00:00</span>
+                </div>
+            </div>
+
+            <button onclick="closeVictoryModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition active:scale-95 shadow-md">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <div id="page" class="max-w-6xl mx-auto bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-screen">
+
+        <!-- Header -->
+        <header class="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-neutral-700 shrink-0"
+                 style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+            <button onclick="goBack()"
+                    aria-label="Back"
+                    class="text-slate-700 dark:text-neutral-300 hover:text-black dark:hover:text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-neutral-800 transition">
+                &#8249;
+            </button>
+            <div class="flex-1 min-w-0">
+                <p id="puzzle-title" class="font-semibold text-slate-900 dark:text-white truncate text-sm">Loading&hellip;</p>
+            </div>
+
+            <!-- Timer Display -->
+            <div id="timer-display" class="font-mono font-bold text-sm text-slate-700 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800 px-2.5 py-1 rounded-md border border-slate-200 dark:border-neutral-700 select-none">
+                00:00
+            </div>
+
+            <span id="rebus-badge" class="hidden px-2 h-8 rounded-full bg-purple-600 text-white text-xs font-semibold items-center justify-center">REBUS</span>
+
+            <button id="kb-toggle-btn" onclick="toggleKeyboardVisibility()"
+                    class="toolbtn w-9 h-9 rounded-full flex items-center justify-center text-base border border-slate-300 dark:border-neutral-700 hover:bg-slate-100 dark:hover:bg-neutral-800 transition"
+                    title="Toggle Keyboard">⌨️</button>
+            <button id="pencil-btn" onclick="togglePencil()"
+                    class="toolbtn w-9 h-9 rounded-full flex items-center justify-center text-lg border border-slate-300 dark:border-neutral-700 hover:bg-slate-100 dark:hover:bg-neutral-800 transition"
+                    title="Pencil mode">&#9998;</button>
+            <button id="autocheck-btn" onclick="toggleAutoCheck()"
+                    class="toolbtn px-3 h-9 rounded-full flex items-center justify-center text-xs font-semibold border border-slate-300 dark:border-neutral-700 hover:bg-slate-100 dark:hover:bg-neutral-800 transition"
+                    title="Auto-check">CHECK</button>
+        </header>
+
+        <!-- Main Body Area -->
+        <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+            <!-- Grid Wrapper -->
+            <main id="grid-wrapper" class="relative flex-1 min-h-0 overflow-auto">
+                <div id="grid-container" class="min-w-full min-h-full flex items-center justify-center p-4 m-auto">
+                    <p id="status" class="text-sm text-slate-500 dark:text-neutral-400 text-center">Loading puzzle&hellip;</p>
+                    <div id="grid" class="hidden"></div>
+                </div>
+            </main>
+
+            <!-- Desktop Clues Sidebar -->
+            <aside id="desktop-clues" class="hidden lg:flex flex-row w-[560px] border-l border-slate-200 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-900 overflow-hidden shrink-0">
+                <div class="flex-1 flex flex-col min-h-0 border-r border-slate-200 dark:border-neutral-700">
+                    <h3 class="font-bold text-xs text-slate-500 dark:text-neutral-400 uppercase tracking-wider px-3 py-2 bg-slate-100 dark:bg-neutral-800 border-b border-slate-200 dark:border-neutral-700">Across</h3>
+                    <div id="across-clues-list" class="flex-1 overflow-y-auto p-2 space-y-1 text-sm"></div>
+                </div>
+                <div class="flex-1 flex flex-col min-h-0">
+                    <h3 class="font-bold text-xs text-slate-500 dark:text-neutral-400 uppercase tracking-wider px-3 py-2 bg-slate-100 dark:bg-neutral-800 border-b border-slate-200 dark:border-neutral-700">Down</h3>
+                    <div id="down-clues-list" class="flex-1 overflow-y-auto p-2 space-y-1 text-sm"></div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Clue bar + keyboard -->
+        <footer class="shrink-0 border-t border-slate-200">
+            <div id="clue-bar"
+                 onclick="toggleDirection()"
+                 class="flex items-center gap-2 bg-[#a9d8f5] px-2 py-2 min-h-[52px] cursor-pointer select-none">
+                <div onclick="event.stopPropagation(); gotoAdjacentClue(-1)"
+                     class="text-2xl leading-none text-slate-800 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full active:bg-black/10">
+                    &#8249;
+                </div>
+                <!-- Left-aligned clue text without 1a / 1d headers -->
+                <p id="clue-text" class="flex-1 text-xs sm:text-sm font-semibold text-slate-900 text-left line-clamp-2 leading-snug px-1">
+                    &nbsp;
+                </p>
+                <div onclick="event.stopPropagation(); gotoAdjacentClue(1)"
+                     class="text-2xl leading-none text-slate-800 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full active:bg-black/10">
+                    &#8250;
+                </div>
+            </div>
+
+            <div id="keyboard" class="bg-slate-200 dark:bg-neutral-800 px-1 pt-1.5"
+                style="padding-bottom: 4.5rem;"></div>
+        </footer>
+    </div>
+
+    <script id="puzzle-meta" type="application/json">
+        {{ {"publisher": publisher, "year": year, "month": month, "day_key": day_key} | tojson }}
+    </script>
+
+    <script>
+        // If we arrived here from the archive (via a `back` link), return
+        // to that same archive page/month instead of always going home.
+        function goBack() {
+            const params = new URLSearchParams(window.location.search);
+            const back = params.get('back');
+            window.location.href = back ? decodeURIComponent(back) : '/';
+        }
+
+        const meta = JSON.parse(document.getElementById('puzzle-meta').textContent);
+
+        let puzzle = null;
+        let userGrid = [];
+        let acrossMap = {};
+        let downMap = {};
+        let numberMap = {};
+        let curRow = 0, curCol = 0;
+        let direction = 'across';
+        let pencilMode = false;
+        let autoCheck = false;
+        let rebusMode = false;
+        let keyboardMode = 'abc';
+        let keyboardVisible = true;
+
+        let timerSeconds = 0;
+        let timerInterval = null;
+        let puzzleFinished = false;
+        let milestonesReached = { 25: false, 50: false, 75: false };
+        let usedCheck = false;
+        let currentRatio = 0.0;
+
+        const MIN_ZOOM = 1, MAX_ZOOM = 3;
+        let zoom = 1;
+        let pinchState = null;
+        let zoomFrame = null;
+        let popoverTimeout = null;
+
+        function cellKey(col, row) { return `${col},${row}`; }
+        function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (!puzzleFinished) {
+                    timerSeconds++;
+                    updateTimerDisplay();
+                    if (timerSeconds % 5 === 0) {
+                        saveProgress();
+                    }
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function saveProgress() {
+            if (!puzzle) return;
+            const saveUrl = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
+            fetch(saveUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userGrid: userGrid,
+                    timerSeconds: timerSeconds,
+                    ratio: currentRatio,
+                    completed: puzzleFinished,
+                    usedCheck: usedCheck
+                })
+            }).catch(e => console.error("Error saving progress:", e));
+        }
+
+        function formatTime(totalSecs) {
+            const m = Math.floor(totalSecs / 60);
+            const s = totalSecs % 60;
+            const h = Math.floor(m / 60);
+            const rm = m % 60;
+            if (h > 0) {
+                return `${h}:${rm.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById('timer-display');
+            if (timerEl) timerEl.textContent = formatTime(timerSeconds);
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => { toast.remove(); }, 2500);
+        }
+
+        function checkProgressAndCompletion() {
+            let filledCount = 0;
+            let totalCells = 0;
+            let isCorrect = true;
+
+            for (let y = 0; y < puzzle.height; y++) {
+                for (let x = 0; x < puzzle.width; x++) {
+                    const cell = puzzle.grid[y][x];
+                    if (!cell.block) {
+                        totalCells++;
+                        const userVal = userGrid[y][x];
+                        // Handle both object format ({ letter: 'A' }) and string format
+                        const userLetter = typeof userVal === 'string' ? userVal : (userVal ? userVal.letter : '');
+                        if (userLetter) {
+                            filledCount++;
+                            if (userLetter.toUpperCase() !== cell.solution.toUpperCase()) {
+                                isCorrect = false;
+                            }
+                        } else {
+                            isCorrect = false;
+                        }
+                    }
+                }
+            }
+
+            currentRatio = totalCells > 0 ? (filledCount / totalCells) : 0;
+
+            if (isCorrect && !puzzleFinished) {
+                puzzleFinished = true;
+                stopTimer();
+
+                try {
+                    const victoryAudio = new Audio('/static/victory.mp3');
+                    victoryAudio.play().catch(err => {
+                        console.warn('Audio playback blocked by browser policy:', err);
+                    });
+                } catch (e) {
+                    console.error('Audio playback error:', e);
+                }
+
+                const completionTime = formatTime(timerSeconds);
+                showToast(`Puzzle Completed in ${completionTime}!`);
+
+                // Display Victory Modal
+                const modal = document.getElementById('victory-modal');
+                if (modal) {
+                    document.getElementById('modal-puzzle-title').textContent = puzzle.title || '';
+                    document.getElementById('modal-completion-time').textContent = completionTime;
+                    modal.classList.remove('hidden');
+                }
+            }
+
+            saveProgress();
+        }
+
+        function closeVictoryModal() {
+            document.getElementById('victory-modal').classList.add('hidden');
+        }
+
+        function isCellVerified(r, c) {
+            return userGrid[r] && userGrid[r][c] && userGrid[r][c].verified;
+        }
+
+        function verifyCell(r, c) {
+            if (!puzzle || !userGrid[r] || !userGrid[r][c]) return;
+            const solution = puzzle.grid[r][c].solution;
+            if (userGrid[r][c].letter && userGrid[r][c].letter.toUpperCase() === solution.toUpperCase()) {
+                userGrid[r][c].verified = true;
+            }
+        }
+
+        function initKeyboardVisibility() {
+            keyboardVisible = window.innerWidth < 1024;
+            updateKeyboardVisibility();
+        }
+
+        function toggleKeyboardVisibility() {
+            keyboardVisible = !keyboardVisible;
+            updateKeyboardVisibility();
+        }
+
+        function updateKeyboardVisibility() {
+            const kb = document.getElementById('keyboard');
+            if (keyboardVisible) kb.classList.remove('hidden');
+            else kb.classList.add('hidden');
+        }
+
+        function exitRebus() {
+            if (rebusMode) {
+                rebusMode = false;
+                document.getElementById('rebus-badge').classList.add('hidden');
+                buildKeyboard();
+            }
+        }
+
+        function toggleRebus() {
+            rebusMode = !rebusMode;
+            document.getElementById('rebus-badge').classList.toggle('hidden', !rebusMode);
+            if (rebusMode) keyboardMode = 'abc';
+            buildKeyboard();
+        }
+
+        function loadPuzzle() {
+            const url = `/api/puzzle-json/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
+            fetch(url).then(r => r.json()).then(data => {
+                if (data.error) {
+                    document.getElementById('status').textContent = `Couldn't load this puzzle: ${data.error}`;
+                    return;
+                }
+                puzzle = data;
+                document.getElementById('puzzle-title').textContent = puzzle.title || '';
+                document.title = puzzle.title || document.title;
+
+                userGrid = Array.from({length: puzzle.height}, () => Array(puzzle.width).fill(null));
+
+                puzzle.clues.across.forEach(c => c.cells.forEach(([x, y]) => acrossMap[cellKey(x, y)] = c));
+                puzzle.clues.down.forEach(c => c.cells.forEach(([x, y]) => downMap[cellKey(x, y)] = c));
+                puzzle.clues.across.concat(puzzle.clues.down).forEach(c => {
+                    numberMap[cellKey(c.col, c.row)] = c.number;
+                });
+
+                const loadUrl = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
+                fetch(loadUrl).then(r => r.json()).then(saved => {
+                    if (saved.userGrid) userGrid = saved.userGrid;
+                    if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
+                    if (saved.usedCheck) usedCheck = saved.usedCheck;
+                    if (saved.completed) puzzleFinished = saved.completed;
+
+                    // Recalculate grid ratio immediately on load before any auto-saves run
+                    checkProgressAndCompletion();
+
+                    // Display stored elapsed time in header
+                    updateTimerDisplay();
+
+                    outer:
+                    for (let y = 0; y < puzzle.height; y++) {
+                        for (let x = 0; x < puzzle.width; x++) {
+                            if (!puzzle.grid[y][x].block) {
+                                curRow = y; curCol = x;
+                                direction = acrossMap[cellKey(x, y)] ? 'across' : 'down';
+                                break outer;
+                            }
+                        }
+                    }
+
+                    buildGridDom();
+                    buildKeyboard();
+                    buildDesktopCluesList();
+                    initKeyboardVisibility();
+
+                    // Start clock if active, or display final solve banner if completed
+                    if (!puzzleFinished) {
+                        startTimer();
+                    } else {
+                        showToast(`Puzzle Completed in ${formatTime(timerSeconds)}`);
+                    }
+
+                    document.getElementById('status').classList.add('hidden');
+                    document.getElementById('grid').classList.remove('hidden');
+                    applyZoomAtPoint(1);
+                    render();
+                });
+            });
+        }
+
+        function buildGridDom() {
+            const gridEl = document.getElementById('grid');
+            gridEl.style.gridTemplateColumns = `repeat(${puzzle.width}, 1fr)`;
+            gridEl.style.aspectRatio = `${puzzle.width} / ${puzzle.height}`;
+            gridEl.style.setProperty('--cw-cols', puzzle.width);
+            gridEl.innerHTML = '';
+            for (let y = 0; y < puzzle.height; y++) {
+                for (let x = 0; x < puzzle.width; x++) {
+                    const cellData = puzzle.grid[y][x];
+                    const div = document.createElement('div');
+                    div.dataset.row = y;
+                    div.dataset.col = x;
+                    div.className = 'cw-cell' + (cellData.block ? ' block' : '');
+                    if (!cellData.block) {
+                        const num = numberMap[cellKey(x, y)];
+                        if (num) {
+                            const numSpan = document.createElement('span');
+                            numSpan.className = 'num';
+                            numSpan.textContent = num;
+                            div.appendChild(numSpan);
+                        }
+                        if (cellData.circled) {
+                            const circle = document.createElement('span');
+                            circle.className = 'circle';
+                            div.appendChild(circle);
+                        }
+                        const letterSpan = document.createElement('span');
+                        letterSpan.className = 'letter';
+                        div.appendChild(letterSpan);
+                    }
+                    gridEl.appendChild(div);
+                }
+            }
+            gridEl.addEventListener('click', e => {
+                const cell = e.target.closest('.cw-cell');
+                if (cell && !cell.classList.contains('block')) {
+                    selectCell(+cell.dataset.row, +cell.dataset.col);
+                }
+            });
+        }
+
+        function buildDesktopCluesList() {
+            if (!puzzle) return;
+            const buildList = (type, containerId) => {
+                const container = document.getElementById(containerId);
+                container.innerHTML = '';
+                puzzle.clues[type].forEach(c => {
+                    const div = document.createElement('div');
+                    div.dataset.number = c.number;
+                    div.dataset.type = type;
+                    div.className = 'clue-item p-1.5 rounded cursor-pointer hover:bg-slate-200 dark:hover:bg-neutral-700 transition text-slate-800 dark:text-slate-200 flex gap-2';
+                    div.innerHTML = `<span class="font-bold min-w-[24px] text-right">${c.number}.</span><span class="flex-1">${c.text}</span>`;
+                    div.addEventListener('click', () => {
+                        direction = type;
+                        curCol = c.cells[0][0];
+                        curRow = c.cells[0][1];
+                        for (let i = 0; i < c.cells.length; i++) {
+                            const [x, y] = c.cells[i];
+                            if (!isCellVerified(y, x)) {
+                                curCol = x; curRow = y;
+                                break;
+                            }
+                        }
+                        render();
+                    });
+                    container.appendChild(div);
+                });
+            };
+
+            buildList('across', 'across-clues-list');
+            buildList('down', 'down-clues-list');
+        }
+
+        function updateDesktopCluesHighlight() {
+            const cur = currentClue();
+            document.querySelectorAll('.clue-item').forEach(el => {
+                const isCurrent = cur && +el.dataset.number === cur.number && el.dataset.type === direction;
+                if (isCurrent) {
+                    el.className = 'clue-item p-1.5 rounded cursor-pointer transition text-slate-900 font-semibold bg-[#a9d8f5] dark:bg-[#2c5a82] dark:text-white flex gap-2';
+                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    el.className = 'clue-item p-1.5 rounded cursor-pointer hover:bg-slate-200 dark:hover:bg-neutral-700 transition text-slate-800 dark:text-slate-200 flex gap-2';
+                }
+            });
+        }
+
+        function buildKeyboard() {
+            const rows = keyboardMode === 'abc'
+                ? [
+                    ['Q','W','E','R','T','Y','U','I','O','P'],
+                    ['A','S','D','F','G','H','J','K','L'],
+                    [{type: 'more'}, 'Z','X','C','V','B','N','M', {type: 'back'}],
+                  ]
+                : [
+                    ['1','2','3','4','5','6','7','8','9','0'],
+                    ['@','#','$','%','&','*','-', '!','+'],
+                    [{type: 'abc'}, "'", ',', '.', ':', '/', {type: 'rebus'}, {type: 'back'}],
+                  ];
+
+            const kb = document.getElementById('keyboard');
+            kb.innerHTML = '';
+            rows.forEach(rowKeys => {
+                const rowEl = document.createElement('div');
+                rowEl.className = 'flex';
+                rowKeys.forEach(k => rowEl.appendChild(buildKey(k)));
+                kb.appendChild(rowEl);
+            });
+        }
+
+        function buildKey(k) {
+            const keyEl = document.createElement('div');
+            if (typeof k === 'object') {
+                keyEl.className = 'kb-key func-key';
+                if (k.type === 'back') {
+                    keyEl.innerHTML = '<svg class="w-5 h-5 mx-auto pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-9.172a2 2 0 00-1.414.586L3 12z"/></svg>';
+                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); backspace(); });
+                } else if (k.type === 'more') {
+                    keyEl.textContent = 'more';
+                    keyEl.style.fontSize = '12px';
+                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); keyboardMode = 'more'; buildKeyboard(); });
+                } else if (k.type === 'abc') {
+                    keyEl.textContent = 'ABC';
+                    keyEl.style.fontSize = '12px';
+                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); keyboardMode = 'abc'; buildKeyboard(); });
+                } else if (k.type === 'rebus') {
+                    if (rebusMode) keyEl.classList.add('active-toggle');
+                    keyEl.style.fontSize = '12px';
+                    keyEl.textContent = rebusMode ? 'REBUS ON' : 'Rebus';
+                    keyEl.addEventListener('pointerdown', (e) => {
+                        e.preventDefault();
+                        toggleRebus();
+                    });
+                }
+            } else {
+                keyEl.className = 'kb-key';
+                keyEl.textContent = k;
+                keyEl.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    showKeyPopup(keyEl, k);
+                    typeLetter(k);
+                });
+            }
+            return keyEl;
+        }
+
+        function showKeyPopup(keyEl, label) {
+            const popover = document.getElementById('key-popover');
+            const rect = keyEl.getBoundingClientRect();
+            popover.textContent = label;
+            popover.style.left = (rect.left + rect.width / 2) + 'px';
+            popover.style.top = rect.top + 'px';
+            popover.style.display = 'block';
+
+            if (popoverTimeout) clearTimeout(popoverTimeout);
+            popoverTimeout = setTimeout(() => { popover.style.display = 'none'; }, 120);
+        }
+
+        function getClue(row, col, dir) {
+            return (dir === 'across' ? acrossMap : downMap)[cellKey(col, row)] || null;
+        }
+
+        function currentClue() {
+            return getClue(curRow, curCol, direction);
+        }
+
+        function selectCell(row, col) {
+            if (row === curRow && col === curCol) {
+                toggleDirection();
+                return;
+            }
+            exitRebus();
+            const hasAcross = acrossMap[cellKey(col, row)];
+            const hasDown = downMap[cellKey(col, row)];
+            let dir = direction;
+            if (dir === 'across' && !hasAcross) dir = 'down';
+            if (dir === 'down' && !hasDown) dir = 'across';
+            curRow = row; curCol = col; direction = dir;
+            render();
+        }
+
+        function toggleDirection() {
+            const hasAcross = acrossMap[cellKey(curCol, curRow)];
+            const hasDown = downMap[cellKey(curCol, curRow)];
+            if (hasAcross && hasDown) {
+                direction = direction === 'across' ? 'down' : 'across';
+                render();
+            }
+        }
+
+        function gotoAdjacentClue(delta) {
+            exitRebus();
+            let list = puzzle.clues[direction];
+            const cur = currentClue();
+            let idx = cur ? list.findIndex(c => c.number === cur.number) : 0;
+            idx += delta;
+
+            if (idx >= list.length) {
+                direction = direction === 'across' ? 'down' : 'across';
+                list = puzzle.clues[direction];
+                idx = 0;
+            } else if (idx < 0) {
+                direction = direction === 'across' ? 'down' : 'across';
+                list = puzzle.clues[direction];
+                idx = list.length - 1;
+            }
+
+            const target = list[idx];
+            if (!target) return;
+
+            let targetCell = target.cells[0];
+            for (let i = 0; i < target.cells.length; i++) {
+                const [x, y] = target.cells[i];
+                if (!isCellVerified(y, x)) {
+                    targetCell = target.cells[i];
+                    break;
+                }
+            }
+            curCol = targetCell[0];
+            curRow = targetCell[1];
+            render();
+        }
+
+        function gotoPreviousWordEnd() {
+            exitRebus();
+            let list = puzzle.clues[direction];
+            const cur = currentClue();
+            let idx = cur ? list.findIndex(c => c.number === cur.number) : 0;
+            idx -= 1;
+
+            if (idx < 0) {
+                direction = direction === 'across' ? 'down' : 'across';
+                list = puzzle.clues[direction];
+                idx = list.length - 1;
+            }
+
+            const target = list[idx];
+            if (!target) return;
+
+            let targetCell = target.cells[target.cells.length - 1];
+            for (let i = target.cells.length - 1; i >= 0; i--) {
+                const [x, y] = target.cells[i];
+                if (!isCellVerified(y, x)) {
+                    targetCell = target.cells[i];
+                    break;
+                }
+            }
+            curCol = targetCell[0];
+            curRow = targetCell[1];
+        }
+
+        function moveCursor(dRow, dCol) {
+            let r = curRow + dRow, c = curCol + dCol;
+            while (r >= 0 && r < puzzle.height && c >= 0 && c < puzzle.width && puzzle.grid[r][c].block) {
+                r += dRow; c += dCol;
+            }
+            if (r >= 0 && r < puzzle.height && c >= 0 && c < puzzle.width) {
+                if (r !== curRow || c !== curCol) exitRebus();
+                curRow = r; curCol = c;
+                if (dRow !== 0) direction = 'down';
+                else if (dCol !== 0) direction = 'across';
+                render();
+            }
+        }
+
+        function advanceCursor() {
+            const clue = currentClue();
+            if (!clue) return;
+
+            const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
+
+            let nextIdx = -1;
+            for (let i = idx + 1; i < clue.cells.length; i++) {
+                const [x, y] = clue.cells[i];
+                if (!isCellVerified(y, x)) {
+                    nextIdx = i;
+                    break;
+                }
+            }
+
+            if (nextIdx !== -1) {
+                exitRebus();
+                [curCol, curRow] = clue.cells[nextIdx];
+            } else {
+                if (autoCheck) {
+                    let firstUnfilledIdx = -1;
+                    for (let i = 0; i < clue.cells.length; i++) {
+                        const [x, y] = clue.cells[i];
+                        if (!isCellVerified(y, x)) {
+                            firstUnfilledIdx = i;
+                            break;
+                        }
+                    }
+
+                    if (firstUnfilledIdx !== -1 && firstUnfilledIdx !== idx) {
+                        exitRebus();
+                        [curCol, curRow] = clue.cells[firstUnfilledIdx];
+                    } else {
+                        gotoAdjacentClue(1);
+                    }
+                } else {
+                    gotoAdjacentClue(1);
+                }
+            }
+        }
+
+        function retreatCursor() {
+            const clue = currentClue();
+            if (!clue) return false;
+            const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
+
+            for (let i = idx - 1; i >= 0; i--) {
+                const [x, y] = clue.cells[i];
+                if (!isCellVerified(y, x)) {
+                    exitRebus();
+                    [curCol, curRow] = clue.cells[i];
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function typeLetter(letter) {
+            if (!puzzle || puzzle.grid[curRow][curCol].block) return;
+
+            if (isCellVerified(curRow, curCol)) {
+                advanceCursor();
+                if (isCellVerified(curRow, curCol)) return;
+            }
+
+            const ch = letter.toUpperCase();
+            if (rebusMode) {
+                const existing = userGrid[curRow][curCol];
+                const combined = ((existing ? existing.letter : '') + ch).slice(0, 8);
+                userGrid[curRow][curCol] = { letter: combined, pencil: pencilMode, verified: false };
+                if (autoCheck) verifyCell(curRow, curCol);
+                checkProgressAndCompletion();
+                render();
+                return;
+            }
+
+            userGrid[curRow][curCol] = { letter: ch, pencil: pencilMode, verified: false };
+            if (autoCheck) verifyCell(curRow, curCol);
+
+            checkProgressAndCompletion();
+            advanceCursor();
+            render();
+        }
+
+        function backspace() {
+            if (!puzzle) return;
+
+            if (isCellVerified(curRow, curCol)) {
+                if (!retreatCursor()) {
+                    gotoPreviousWordEnd();
+                }
+                render();
+                return;
+            }
+
+            const existing = userGrid[curRow][curCol];
+            if (existing && existing.letter && existing.letter.length > 1) {
+                userGrid[curRow][curCol] = { letter: existing.letter.slice(0, -1), pencil: existing.pencil, verified: false };
+            } else if (existing && existing.letter) {
+                userGrid[curRow][curCol] = null;
+            } else {
+                const moved = retreatCursor();
+                if (!moved) {
+                    gotoPreviousWordEnd();
+                } else {
+                    if (!isCellVerified(curRow, curCol) && userGrid[curRow][curCol]) {
+                        userGrid[curRow][curCol] = null;
+                    }
+                }
+            }
+            checkProgressAndCompletion();
+            render();
+        }
+
+        function togglePencil() {
+            pencilMode = !pencilMode;
+            document.getElementById('pencil-btn').classList.toggle('active', pencilMode);
+        }
+
+        function toggleAutoCheck() {
+            usedCheck = true;
+            autoCheck = !autoCheck;
+            document.getElementById('autocheck-btn').classList.toggle('active', autoCheck);
+            if (autoCheck && puzzle) {
+                for (let r = 0; r < puzzle.height; r++) {
+                    for (let c = 0; c < puzzle.width; c++) {
+                        if (userGrid[r][c]) verifyCell(r, c);
+                    }
+                }
+            }
+            checkProgressAndCompletion();
+            render();
+        }
+
+        function computeZoomFromPinch(startZoom, startDist, newDist) {
+            if (!startDist) return startZoom;
+            return clamp(startZoom * (newDist / startDist), MIN_ZOOM, MAX_ZOOM);
+        }
+
+        function updateGridDimensions(targetZoom) {
+            const wrapper = document.getElementById('grid-wrapper');
+            const gridEl = document.getElementById('grid');
+            if (!wrapper || !gridEl || !puzzle) return;
+
+            zoom = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
+
+            const cols = puzzle.width, rows = puzzle.height;
+            const availableWidth = wrapper.clientWidth - 32;
+            const availableHeight = wrapper.clientHeight - 32;
+
+            const fitCell = Math.min(
+                availableWidth > 0 ? availableWidth / cols : 34,
+                availableHeight > 0 ? availableHeight / rows : 34
+            );
+            const baseCell = fitCell;
+            const cellSize = baseCell * zoom;
+
+            gridEl.style.maxWidth = 'none';
+            gridEl.style.width = Math.round(cellSize * cols) + 'px';
+            gridEl.style.height = Math.round(cellSize * rows) + 'px';
+        }
+
+        function applyZoomAtPoint(newZoom, focalX, focalY) {
+            const wrapper = document.getElementById('grid-wrapper');
+            if (!wrapper) return;
+
+            const oldZoom = zoom;
+            updateGridDimensions(newZoom);
+
+            const rect = wrapper.getBoundingClientRect();
+            const fx = focalX !== undefined ? focalX - rect.left : rect.width / 2;
+            const fy = focalY !== undefined ? focalY - rect.top : rect.height / 2;
+
+            if (oldZoom !== zoom && oldZoom > 0) {
+                const ratio = zoom / oldZoom;
+                wrapper.scrollLeft = (wrapper.scrollLeft + fx) * ratio - fx;
+                wrapper.scrollTop = (wrapper.scrollTop + fy) * ratio - fy;
+            }
+        }
+
+        function scrollToCurrentCell() {
+            if (!puzzle) return;
+            const wrapper = document.getElementById('grid-wrapper');
+            const gridEl = document.getElementById('grid');
+            if (!wrapper || !gridEl) return;
+
+            let rMin = curRow, rMax = curRow;
+            let cMin = curCol, cMax = curCol;
+
+            if (direction === 'across') {
+                cMin = clamp(curCol - 1, 0, puzzle.width - 1);
+                cMax = clamp(curCol + 2, 0, puzzle.width - 1);
+            } else {
+                rMin = clamp(curRow - 1, 0, puzzle.height - 1);
+                rMax = clamp(curRow + 2, 0, puzzle.height - 1);
+            }
+
+            const minCell = document.querySelector(`.cw-cell[data-row="${rMin}"][data-col="${cMin}"]`);
+            const maxCell = document.querySelector(`.cw-cell[data-row="${rMax}"][data-col="${cMax}"]`);
+
+            if (!minCell || !maxCell) return;
+
+            const wrapperRect = wrapper.getBoundingClientRect();
+            const minRect = minCell.getBoundingClientRect();
+            const maxRect = maxCell.getBoundingClientRect();
+
+            const targetLeft = Math.min(minRect.left, maxRect.left);
+            const targetRight = Math.max(minRect.right, maxRect.right);
+            const targetTop = Math.min(minRect.top, maxRect.top);
+            const targetBottom = Math.max(minRect.bottom, maxRect.bottom);
+
+            const margin = 20;
+
+            let scrollDx = 0;
+            let scrollDy = 0;
+
+            if (targetLeft - margin < wrapperRect.left) {
+                scrollDx = (targetLeft - margin) - wrapperRect.left;
+            } else if (targetRight + margin > wrapperRect.right) {
+                scrollDx = (targetRight + margin) - wrapperRect.right;
+            }
+
+            if (targetTop - margin < wrapperRect.top) {
+                scrollDy = (targetTop - margin) - wrapperRect.top;
+            } else if (targetBottom + margin > wrapperRect.bottom) {
+                scrollDy = (targetBottom + margin) - wrapperRect.bottom;
+            }
+
+            if (scrollDx !== 0 || scrollDy !== 0) {
+                wrapper.scrollBy({
+                    left: scrollDx,
+                    top: scrollDy,
+                    behavior: 'smooth'
+                });
+            }
+        }
+
+        function distanceBetween(t1, t2) {
+            const dx = t1.clientX - t2.clientX;
+            const dy = t1.clientY - t2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function setupZoomListeners() {
+            const wrapper = document.getElementById('grid-wrapper');
+
+            wrapper.addEventListener('wheel', e => {
+                if (e.ctrlKey || e.metaKey || e.altKey) {
+                    e.preventDefault();
+                    const delta = e.deltaY < 0 ? 0.15 : -0.15;
+                    applyZoomAtPoint(zoom + delta, e.clientX, e.clientY);
+                }
+            }, { passive: false });
+
+            wrapper.addEventListener('touchstart', e => {
+                if (e.touches.length === 2) {
+                    const rect = wrapper.getBoundingClientRect();
+                    const t0 = e.touches[0];
+                    const t1 = e.touches[1];
+                    const cX = (t0.clientX + t1.clientX) / 2;
+                    const cY = (t0.clientY + t1.clientY) / 2;
+
+                    pinchState = {
+                        startDist: distanceBetween(t0, t1),
+                        startZoom: zoom,
+                        contentX: wrapper.scrollLeft + (cX - rect.left),
+                        contentY: wrapper.scrollTop + (cY - rect.top)
+                    };
+                }
+            }, { passive: true });
+
+            wrapper.addEventListener('touchmove', e => {
+                if (e.touches.length === 2 && pinchState) {
+                    e.preventDefault(); // Intercept browser pinch to handle grid scale + pan
+
+                    const t0 = e.touches[0];
+                    const t1 = e.touches[1];
+                    const newDist = distanceBetween(t0, t1);
+                    const currentCenterX = (t0.clientX + t1.clientX) / 2;
+                    const currentCenterY = (t0.clientY + t1.clientY) / 2;
+
+                    const scale = pinchState.startDist > 0 ? (newDist / pinchState.startDist) : 1;
+                    const targetZoom = clamp(pinchState.startZoom * scale, MIN_ZOOM, MAX_ZOOM);
+
+                    if (zoomFrame) cancelAnimationFrame(zoomFrame);
+                    zoomFrame = requestAnimationFrame(() => {
+                        updateGridDimensions(targetZoom);
+
+                        const effectiveScale = zoom / pinchState.startZoom;
+                        const rect = wrapper.getBoundingClientRect();
+
+                        // Keep the exact touch anchor point locked under your fingers while scaling and panning
+                        wrapper.scrollLeft = (pinchState.contentX * effectiveScale) - (currentCenterX - rect.left);
+                        wrapper.scrollTop = (pinchState.contentY * effectiveScale) - (currentCenterY - rect.top);
+                    });
+                }
+            }, { passive: false });
+
+            wrapper.addEventListener('touchend', e => {
+                if (e.touches.length < 2) pinchState = null;
+            });
+            wrapper.addEventListener('touchcancel', e => {
+                if (e.touches.length < 2) pinchState = null;
+            });
+        }
+
+        function render() {
+            const clue = currentClue();
+            const activeCells = clue ? new Set(clue.cells.map(([x, y]) => cellKey(x, y))) : new Set();
+
+            document.querySelectorAll('#grid .cw-cell').forEach(div => {
+                if (div.classList.contains('block')) return;
+                const row = +div.dataset.row, col = +div.dataset.col;
+                const inWord = activeCells.has(cellKey(col, row));
+                const isCurrent = row === curRow && col === curCol;
+                div.classList.toggle('in-word', inWord && !isCurrent);
+                div.classList.toggle('current', isCurrent);
+
+                const entry = userGrid[row][col];
+                const letterSpan = div.querySelector('.letter');
+                letterSpan.textContent = entry ? entry.letter : '';
+
+                if (entry && entry.letter.length > 1) {
+                    const len = entry.letter.length;
+                    const scale = Math.max(0.28, 0.6 - (len * 0.06));
+                    letterSpan.style.fontSize = `calc(${scale * 100}cqw / var(--cw-cols, 15))`;
+                } else {
+                    letterSpan.style.fontSize = '';
+                }
+
+                const isVerified = entry && entry.verified;
+                const solution = puzzle.grid[row][col].solution;
+                const isWrong = autoCheck && entry && entry.letter && entry.letter !== solution;
+
+                div.classList.toggle('correct-letter', !!isVerified);
+                div.classList.toggle('wrong-letter', !isVerified && !!isWrong);
+                div.classList.toggle('pencil-letter', !!(entry && entry.pencil && !isVerified));
+            });
+
+            const clueTextEl = document.getElementById('clue-text');
+            if (clue) clueTextEl.textContent = clue.text;
+            else clueTextEl.textContent = '';
+
+            updateDesktopCluesHighlight();
+            scrollToCurrentCell();
+        }
+
+        document.addEventListener('keydown', e => {
+            if (!puzzle) return;
+            if (/^[a-zA-Z0-9]$/.test(e.key)) {
+                typeLetter(e.key);
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                backspace();
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft') {
+                moveCursor(0, -1); e.preventDefault();
+            } else if (e.key === 'ArrowRight') {
+                moveCursor(0, 1); e.preventDefault();
+            } else if (e.key === 'ArrowUp') {
+                moveCursor(-1, 0); e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                moveCursor(1, 0); e.preventDefault();
+            } else if (e.key === ' ') {
+                toggleDirection(); e.preventDefault();
+            } else if (e.key === 'Tab') {
+                gotoAdjacentClue(e.shiftKey ? -1 : 1); e.preventDefault();
+            }
+        });
+
+        setupZoomListeners();
+        window.addEventListener('resize', () => { if (puzzle) applyZoomAtPoint(zoom); });
+        loadPuzzle();
+    </script>
+</body>
+</html>

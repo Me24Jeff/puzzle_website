@@ -1,0 +1,21 @@
+# crossword-app scraper schedule
+# All times are in the container's TZ (see docker-compose.yml -> TZ=America/New_York),
+# since that's the timezone NYT actually resets puzzles in.
+#`
+# min  hour  dom  month  dow  user  command
+
+# Wordle flips at midnight local time (which is around 5pm ET)
+# Run at 17:10 to give their systems a few minutes of buffer.
+10  17  *  *  *  root  /app/scripts/wordle_daily.sh >> /app/data/logs/cron.log 2>&1
+
+# Daily/Mini/Midi crosswords: NYT flips these at 10pm ET the night before on Tuesday - Saturday and at 6pm ET the night before on Monday and Sunday.
+10  22  *  *  2-6   root /app/scripts/crosswords_daily.sh >> /app/data/logs/cron.log 2>&1
+10  18  *  *  0,1   root /app/scripts/crosswords_daily.sh >> /app/data/logs/cron.log 2>&1
+
+# Spelling Bee: NYT resets this one at 3am ET specifically.
+10  3  *  *  *  root  /app/scripts/spelling_bee_daily.sh >> /app/data/logs/cron.log 2>&1
+
+# Weekly xwords archive pull from your GitHub repo, every Sunday at 1pm ET.
+0  13  *  *  0  root  /app/scripts/weekly_xwords_pull.sh >> /app/data/logs/cron.log 2>&1
+
+# Required trailing newline for cron

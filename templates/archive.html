@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>Puzzle Archive</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'media'
+        }
+        // Which tab to open on load, set by the /archive/<type_folder> route.
+        const INITIAL_CATEGORY = {{ (initial_type or 'midi') | tojson }};
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            overscroll-behavior: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            /* Dynamic viewport height so mobile browser chrome
+               (address bar showing/hiding) never leaves content taller
+               than the visible area - this was causing the page to
+               need scrolling on some devices. */
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .day-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+            min-height: 0;
+        }
+        .day-cell:active {
+            transform: scale(0.92);
+        }
+
+        .status-icon {
+            width: 100%;
+            max-width: 40px;
+            aspect-ratio: 1 / 1;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 3px;
+            box-sizing: border-box;
+            overflow: hidden;
+            background-color: #f1f5f9;
+            border: 1px solid #cbd5e1;
+        }
+        @media (prefers-color-scheme: dark) {
+            .status-icon {
+                background-color: #111827;
+                border-color: #374151;
+            }
+        }
+
+        .status-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Calendar grid fills whatever space is left between the header
+           and the bottom dock, and scrolls internally on the rare
+           screen that's too short for 6 rows, instead of the whole
+           page scrolling. */
+        #calendar-scroll {
+            /* flex: 1; */
+            min-height: 0;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+        #calendar-scroll::-webkit-scrollbar { display: none; }
+
+        #calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 12px 6px;
+            height: 100%;
+        }
+
+        .tab-dock {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+        }
+        @media (prefers-color-scheme: dark) {
+            .tab-dock {
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+            }
+        }
+
+        .tab-item {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .tab-item.active {
+            background-color: #2563eb;
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body class="items-center max-w-md mx-auto w-full px-4 bg-slate-50 text-slate-900 dark:bg-[#1c1c1e] dark:text-slate-100"
+      style="padding-top: max(0.5rem, env(safe-area-inset-top)); padding-bottom: max(6.5rem, calc(6.5rem + env(safe-area-inset-bottom)));">
+
+    <!-- Top Navigation Header -->
+    <!-- Top Navigation Header -->
+    <header class="w-full flex items-center justify-between pt-2 pb-3 shrink-0">
+        <a href="/" aria-label="Back to dashboard" class="w-10 h-10 rounded-full border border-slate-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 flex items-center justify-center text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-700 active:scale-95 transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </a>
+
+        <div class="flex items-center gap-1">
+            <div class="relative inline-block">
+                <select id="month-year-select" onchange="onSelectMonthYear(this.value)"
+                        class="appearance-none bg-white dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 text-slate-900 dark:text-white font-serif text-lg font-semibold px-4 py-1.5 pr-8 rounded-xl focus:outline-none cursor-pointer shadow-sm">
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <!-- Category Title -->
+    <div class="text-center mb-2 shrink-0">
+        <h1 id="category-title" class="text-2xl sm:text-3xl font-serif font-black tracking-tight text-slate-900 dark:text-white">The Midi</h1>
+    </div>
+
+    <!-- Calendar Container -->
+    <main class="w-full flex-1 flex flex-col min-h-0">
+        <div class="grid grid-cols-7 gap-2 mb-2 text-center text-xs font-semibold text-slate-400 dark:text-neutral-400 border-b border-slate-200 dark:border-neutral-800 pb-2 shrink-0">
+            <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+        </div>
+
+        <div id="calendar-scroll">
+            <div id="calendar-grid"></div>
+        </div>
+    </main>
+
+    <!-- Floating Bottom Navigation Dock -->
+    <nav class="fixed tab-dock bg-white/90 dark:bg-neutral-800/90 border border-slate-200 dark:border-neutral-700 rounded-2xl p-1.5 flex items-center gap-2 z-50 backdrop-blur-md"
+         style="bottom: max(1.5rem, calc(1rem + env(safe-area-inset-bottom)));">
+        <button id="tab-crossword" onclick="switchCategory('normal')" class="tab-item text-slate-700 dark:text-slate-300" title="The Crossword">
+            <img src="../static/normal/progress-0.svg" width="25" height="25">
+        </button>
+
+        <button id="tab-midi" onclick="switchCategory('midi')" class="tab-item active text-slate-700 dark:text-slate-300" title="The Midi">
+            <img src="../static/midi/progress-0.svg" width="25", height="25">
+        </button>
+
+        <button id="tab-mini" onclick="switchCategory('mini')" class="tab-item text-slate-700 dark:text-slate-300" title="The Mini">
+            <img src="../static/mini/progress-0.svg" width="25", height="25">
+
+        </button>
+
+        <button id="tab-wordle" onclick="switchCategory('wordle')" class="tab-item text-slate-700 dark:text-slate-300" title="Wordle">
+            <img src="../static/wordle/progress-0.svg" width="25" height="25">
+        </button>
+
+        <button id="tab-spelling-bee" onclick="switchCategory('spelling-bee')" class="tab-item text-slate-700 dark:text-slate-300" title="Spelling Bee">
+            <img src="../static/spelling-bee/progress-0.svg" width="25" height="25">
+        </button>
+    </nav>
+
+    <script>
+        // Puzzle types, keyed by typeFolder to match index.html: the same
+        // key names the static/<typeFolder>/... progress image assets use,
+        // and the same convention the rest of the app relies on for
+        // progress lookups. NY Times puzzles share a publisher, with the
+        // puzzle type encoded as a suffix on the day_key; Wordle gets its
+        // own publisher instead since it isn't from NY Times.
+        const CATEGORIES = {
+            normal:        { title: "The Crossword", suffix: "",      publisher: "NY Times" },
+            midi:          { title: "The Midi",      suffix: "-midi", publisher: "NY Times" },
+            mini:          { title: "The Mini",      suffix: "-mini", publisher: "NY Times" },
+            wordle:        { title: "Wordle",        suffix: "",      publisher: "Wordle" },
+            'spelling-bee':{ title: "Spelling Bee",  suffix: "",      publisher: "SpellingBee" }
+        };
+
+        // Spelling Bee's progress icons are keyed by rank tier rather than a
+        // plain 0-9 fill bucket - see beeProgressImageIndex() below.
+        const BEE_RANK_PCTS = [0, 0.02, 0.05, 0.08, 0.15, 0.25, 0.40, 0.50, 0.70, 1.00];
+        function beeRankIndexFromRatio(ratio) {
+            let idx = 0;
+            for (let i = 0; i < BEE_RANK_PCTS.length; i++) {
+                if (ratio >= BEE_RANK_PCTS[i]) idx = i;
+            }
+            return idx;
+        }
+        // Maps a rank index (0-9) to one of the 9 progress-N.svg files
+        // (0 = not started, 8 = Queen Bee). Beginner/Good Start share an
+        // image, as do Moving Up/Good and Nice/Great.
+        function beeProgressImageIndex(rankIdx) {
+            if (rankIdx <= 1) return 1;
+            if (rankIdx <= 3) return 2;
+            if (rankIdx === 4) return 3;
+            if (rankIdx <= 6) return 4;
+            if (rankIdx === 7) return 5;
+            if (rankIdx === 8) return 6;
+            return 8; // Queen Bee
+        }
+
+        // Only populated for the Wordle tab: dates outside this range have no
+        // word yet and are greyed out like future days.
+        let wordleRange = null;
+
+        // Earliest year+month with puzzles available, per category - fetched
+        // from the backend since each puzzle type started at a different
+        // point (e.g. the classic Crossword goes back to 1942, the Midi and
+        // Mini are much newer) and shouldn't be hardcoded.
+        let startCache = {};
+
+        let currentCategory = (typeof INITIAL_CATEGORY !== 'undefined' && CATEGORIES[INITIAL_CATEGORY]) ? INITIAL_CATEGORY : 'midi';
+        let currentDate = new Date();
+
+        // If we were sent here from the archive's own puzzle list (via the
+        // `back` link from play/wordle), land back on the same month/year
+        // instead of resetting to today.
+        (function applyInitialDateFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const y = parseInt(params.get('y'), 10);
+            const m = parseInt(params.get('m'), 10);
+            if (!isNaN(y) && !isNaN(m)) {
+                currentDate = new Date(y, m, 1);
+            }
+        })();
+
+        let archiveProgressData = {};
+
+        const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+        function initArchive() {
+            switchCategory(currentCategory);
+        }
+
+        function getStart(catKey) {
+            if (startCache[catKey]) return startCache[catKey];
+            const now = new Date();
+            return { year: now.getFullYear(), month: now.getMonth() };
+        }
+
+        function populateMonthYearDropdown() {
+            const selectEl = document.getElementById('month-year-select');
+            selectEl.innerHTML = '';
+
+            const start = getStart(currentCategory);
+            const now = new Date();
+            const endYear = now.getFullYear();
+
+            for (let y = endYear; y >= start.year; y--) {
+                const maxMonth = (y === endYear) ? now.getMonth() : 11;
+                const minMonth = (y === start.year) ? start.month : 0;
+                for (let m = maxMonth; m >= minMonth; m--) {
+                    const opt = document.createElement('option');
+                    opt.value = `${y}-${m}`;
+                    opt.textContent = `${monthNames[m]} ${y}`;
+                    if (y === currentDate.getFullYear() && m === currentDate.getMonth()) {
+                        opt.selected = true;
+                    }
+                    selectEl.appendChild(opt);
+                }
+            }
+        }
+
+        function onSelectMonthYear(val) {
+            const [y, m] = val.split('-').map(Number);
+            currentDate.setFullYear(y);
+            currentDate.setMonth(m);
+            loadArchiveDataAndRender();
+        }
+
+        function changeMonth(delta) {
+            const next = new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1);
+            const today = new Date();
+            const maxDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            const start = getStart(currentCategory);
+            const minDate = new Date(start.year, start.month, 1);
+
+            if (next > maxDate) currentDate = maxDate;
+            else if (next < minDate) currentDate = minDate;
+            else currentDate = next;
+
+            const selectEl = document.getElementById('month-year-select');
+            selectEl.value = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
+            loadArchiveDataAndRender();
+        }
+
+        function switchCategory(catKey) {
+            if (!CATEGORIES[catKey]) catKey = 'midi';
+            currentCategory = catKey;
+            document.getElementById('category-title').textContent = CATEGORIES[catKey].title;
+
+            document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+            const tabId = catKey === 'normal' ? 'tab-crossword' : `tab-${catKey}`;
+            document.getElementById(tabId).classList.add('active');
+
+            // Keep the URL in sync so refreshing/sharing lands on the same tab.
+            const newPath = `/archive/${catKey}`;
+            if (window.location.pathname !== newPath) {
+                window.history.replaceState(null, '', newPath);
+            }
+
+            if (catKey === 'wordle' && wordleRange === null) {
+                fetch('/api/wordle-range')
+                    .then(res => res.json())
+                    .then(data => {
+                        wordleRange = data.startDate ? data : { startDate: null, endDate: null };
+                        renderCalendar();
+                    })
+                    .catch(() => { wordleRange = { startDate: null, endDate: null }; renderCalendar(); });
+            }
+
+            const applyRangeAndLoad = () => {
+                populateMonthYearDropdown();
+                loadArchiveDataAndRender();
+            };
+
+            if (startCache[catKey] !== undefined) {
+                applyRangeAndLoad();
+            } else {
+                fetch(`/api/archive-range/${catKey}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const now = new Date();
+                        startCache[catKey] = {
+                            year: data.startYear || now.getFullYear(),
+                            // Backend month is 1-indexed; Date uses 0-indexed.
+                            month: data.startMonth ? (data.startMonth - 1) : 0
+                        };
+                        applyRangeAndLoad();
+                    })
+                    .catch(() => {
+                        const now = new Date();
+                        startCache[catKey] = { year: now.getFullYear(), month: now.getMonth() };
+                        applyRangeAndLoad();
+                    });
+            }
+        }
+
+        // Set of day-of-month numbers with a real puzzle for the currently
+        // loaded month, or null when that check doesn't apply (Wordle,
+        // whose availability is a contiguous range handled separately).
+        let availableDaysThisMonth = null;
+
+        function loadArchiveDataAndRender() {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+
+            const url = `/api/archive-progress/${currentCategory}/${year}/${month}`;
+
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    archiveProgressData = data.progress || {};
+                    availableDaysThisMonth = data.availableDays ? new Set(data.availableDays) : null;
+                    renderCalendar();
+                })
+                .catch(err => {
+                    archiveProgressData = {};
+                    availableDaysThisMonth = null;
+                    renderCalendar();
+                });
+        }
+
+        // Mirrors index.html's getProgressImage(), so archive icons look
+        // exactly like the ones on the dashboard.
+        function getProgressImage(dayProgress) {
+            if (!dayProgress || (!dayProgress.ratio && !dayProgress.completed)) {
+                return `/static/${currentCategory}/progress-0.svg`;
+            }
+
+            if (currentCategory === 'spelling-bee') {
+                const ratio = dayProgress.completed ? 1 : (dayProgress.ratio || 0);
+                const rankIdx = beeRankIndexFromRatio(ratio);
+                return `/static/spelling-bee/progress-${beeProgressImageIndex(rankIdx)}.svg`;
+            }
+
+            if (dayProgress.completed) {
+                if (currentCategory === 'wordle') {
+                    // usedCheck is repurposed for Wordle: true = won, false = lost
+                    return `/static/wordle/${dayProgress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
+                }
+                return `/static/${currentCategory}/${dayProgress.usedCheck ? 'complete' : 'complete-gold'}.svg`;
+            }
+
+            if (currentCategory === 'wordle') {
+                // ratio is guessesUsed/6, so this reconstructs the exact guess
+                // count (0-5) rather than bucketing it like the fill-ratio types below.
+                const guessesUsed = Math.min(5, Math.round((dayProgress.ratio || 0) * 6));
+                return `/static/wordle/progress-${guessesUsed}.svg`;
+            }
+
+            const maxIdx = (currentCategory === 'mini') ? 4 : 9;
+            let idx;
+
+            if (dayProgress.ratio >= 1.0) {
+                idx = maxIdx;
+            } else {
+                idx = Math.min(maxIdx - 1, Math.floor(dayProgress.ratio * maxIdx));
+            }
+
+            return `/static/${currentCategory}/progress-${idx}.svg`;
+        }
+
+        function renderCalendar() {
+            const grid = document.getElementById('calendar-grid');
+            grid.innerHTML = '';
+
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const totalCells = firstDayIndex + daysInMonth;
+            const rowCount = Math.ceil(totalCells / 7);
+            grid.style.gridTemplateRows = `repeat(${rowCount}, minmax(0, 1fr))`;
+
+            for (let i = 0; i < firstDayIndex; i++) {
+                grid.appendChild(document.createElement('div'));
+            }
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const cellDate = new Date(year, month, day);
+                const isFuture = cellDate > today;
+
+                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+                // For Wordle, dates before the word list started have no puzzle either.
+                let isUnavailable = isFuture;
+                if (currentCategory === 'wordle' && wordleRange && wordleRange.startDate) {
+                    if (dateKey < wordleRange.startDate) isUnavailable = true;
+                } else if (currentCategory === 'wordle' && wordleRange && !wordleRange.startDate) {
+                    isUnavailable = true; // empty word list
+                } else if (availableDaysThisMonth !== null && !isUnavailable) {
+                    // Crossword/Midi/Mini didn't always publish every single
+                    // day (especially in older years), so a day inside the
+                    // valid range can still have no actual puzzle.
+                    if (!availableDaysThisMonth.has(day)) isUnavailable = true;
+                }
+
+                const dayCell = document.createElement('div');
+                dayCell.className = 'day-cell';
+
+                const dayProgress = archiveProgressData[dateKey] || null;
+
+                let iconHtml;
+                if (isUnavailable) {
+                    iconHtml = `<img src="/static/${currentCategory}/unavailable.svg" alt="Unavailable">`;
+                } else {
+                    iconHtml = `<img src="${getProgressImage(dayProgress)}" alt="Progress" onerror="this.style.display='none'">`;
+                }
+
+                dayCell.innerHTML = `
+                    <div class="status-icon">
+                        ${iconHtml}
+                    </div>
+                    <span class="text-xs font-semibold ${isUnavailable ? 'text-slate-400 dark:text-neutral-600' : 'text-slate-700 dark:text-neutral-300'}">${day}</span>
+                `;
+
+                if (!isUnavailable) {
+                    dayCell.addEventListener('click', () => {
+                        const monthKey = String(month + 1).padStart(2, '0');
+                        const dayNum = String(day).padStart(2, '0');
+
+                        // So the puzzle's back button can return here, to the
+                        // same tab and month/year, instead of the dashboard.
+                        const backUrl = `/archive/${currentCategory}?y=${year}&m=${month}`;
+                        const backParam = `back=${encodeURIComponent(backUrl)}`;
+
+                        if (currentCategory === 'wordle') {
+                            window.location.href = `/wordle/${year}/${monthKey}/${dayNum}?${backParam}`;
+                        } else if (currentCategory === 'spelling-bee') {
+                            window.location.href = `/spelling-bee/${year}/${monthKey}/${dayNum}?${backParam}`;
+                        } else {
+                            const suffix = CATEGORIES[currentCategory].suffix;
+                            const dayKey = dayNum + suffix;
+                            const publisher = CATEGORIES[currentCategory].publisher;
+                            window.location.href = `/play/${encodeURIComponent(publisher)}/${year}/${monthKey}/${encodeURIComponent(dayKey)}?${backParam}`;
+                        }
+                    });
+                }
+
+                grid.appendChild(dayCell);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initArchive);
+    </script>
+</body>
+</html>

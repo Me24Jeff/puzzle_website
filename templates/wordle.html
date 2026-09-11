@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>Wordle &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'media'
+        }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: manipulation;
+        }
+        body { background: #f1f5f9; }
+        @media (prefers-color-scheme: dark) {
+            body { background: #1c1c1e; }
+        }
+
+        #page {
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        /* Wordle tile grid */
+        #board-container {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 10px 0;
+        }
+
+        #board {
+            display: grid;
+            grid-template-rows: repeat(var(--max-guesses, 6), 1fr);
+            grid-gap: 5px;
+            width: 100%;
+            max-width: 330px;
+            height: 100%;
+            max-height: 400px;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: repeat(var(--word-length, 5), 1fr);
+            grid-gap: 5px;
+        }
+
+        .tile {
+            border: 2px solid #d3d6da;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            user-select: none;
+            perspective: 1000px;
+            border-radius: 4px;
+            color: #0f172a;
+        }
+        @media (prefers-color-scheme: dark) {
+            .tile { border-color: #3a3a3c; color: #f1f5f9; }
+        }
+
+        .tile.flip {
+            animation: flip 0.8s ease-in-out forwards;
+        }
+
+        @keyframes flip {
+            0% { transform: rotateX(0deg); }
+            50% { transform: rotateX(90deg); }
+            100% { transform: rotateX(0deg); }
+        }
+
+        .tile.shake {
+            animation: shake 0.75s ease-in-out;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translateX(-1px); }
+            20%, 80% { transform: translateX(2px); }
+            30%, 50%, 70% { transform: translateX(-4px); }
+            40%, 60% { transform: translateX(4px); }
+        }
+
+        .tile[data-state="correct"] { background-color: #538d4e; border-color: #538d4e; color: white; }
+        .tile[data-state="present"] { background-color: #b59f3b; border-color: #b59f3b; color: white; }
+        .tile[data-state="absent"]  { background-color: #787c7e; border-color: #787c7e; color: white; }
+        @media (prefers-color-scheme: dark) {
+            .tile[data-state="absent"] { background-color: #3a3a3c; border-color: #3a3a3c; }
+        }
+
+        /* Keyboard */
+        #keyboard {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            flex-shrink: 0;
+            padding: 0 8px;
+            padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+        }
+
+        .k-row {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .key {
+            background-color: #d3d6da;
+            color: #0f172a;
+            border: none;
+            border-radius: 6px;
+            padding: 14px 0;
+            font-weight: bold;
+            font-size: 0.9rem;
+            flex: 1;
+            cursor: pointer;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s ease, color 0.2s ease;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @media (prefers-color-scheme: dark) {
+            .key { background-color: #3f3f46; color: #f1f5f9; }
+        }
+
+        .key.wide { flex: 1.5; font-size: 0.75rem; }
+        .key[data-state="correct"] { background-color: #538d4e; color: white; }
+        .key[data-state="present"] { background-color: #b59f3b; color: white; }
+        .key[data-state="absent"]  { background-color: #787c7e; color: white; opacity: 0.5; }
+
+        #toast-container {
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9000;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+            animation: fadeInOut 2.5s forwards;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            15% { opacity: 1; transform: translateY(0); }
+            85% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="toast-container"></div>
+
+    <!-- Result Modal (win or loss) -->
+    <div id="result-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl transform transition-all border border-slate-100 dark:border-neutral-700">
+            <div id="modal-emoji" class="text-5xl mb-3">🎉</div>
+            <h2 id="modal-title" class="text-2xl font-black text-slate-900 dark:text-white mb-1">Nice!</h2>
+            <p id="modal-subtitle" class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">You got it!</p>
+
+            <div class="bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl p-4 mb-6">
+                <p id="modal-word" class="font-bold text-slate-800 dark:text-slate-100 text-lg tracking-widest mb-1">&nbsp;</p>
+                <div class="flex items-center justify-center gap-1.5 text-slate-600 dark:text-neutral-400 text-sm font-semibold">
+                    <span>🔢 Guesses:</span>
+                    <span id="modal-guess-count" class="font-mono text-slate-900 dark:text-white">0/6</span>
+                </div>
+            </div>
+
+            <button onclick="closeResultModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition active:scale-95 shadow-md">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <div id="page" class="max-w-6xl mx-auto bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-screen">
+
+        <!-- Header -->
+        <header class="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-neutral-700 shrink-0"
+                 style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+            <button onclick="goBack()"
+                    aria-label="Back"
+                    class="text-slate-700 dark:text-neutral-300 hover:text-black dark:hover:text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-neutral-800 transition">
+                &#8249;
+            </button>
+            <div class="flex-1 min-w-0">
+                <p class="font-semibold text-slate-900 dark:text-white truncate text-sm">The Wordle</p>
+                <p id="puzzle-date" class="text-xs text-slate-500 dark:text-neutral-400 truncate"></p>
+            </div>
+
+            <!-- Guess Counter -->
+            <div id="guess-counter" class="font-mono font-bold text-sm text-slate-700 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800 px-2.5 py-1 rounded-md border border-slate-200 dark:border-neutral-700 select-none">
+                0/6
+            </div>
+        </header>
+
+        {% if word_unavailable %}
+        <div class="flex-1 flex items-center justify-center p-6">
+            <div class="text-center max-w-sm">
+                <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
+                <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or before the Wordle archive started.</p>
+            </div>
+        </div>
+        {% else %}
+        <div id="board-container">
+            <div id="board" style="--max-guesses: {{ max_guesses }};"></div>
+        </div>
+
+        <div id="keyboard">
+            <div class="k-row" id="k1"></div>
+            <div class="k-row" id="k2"></div>
+            <div class="k-row" id="k3"></div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script id="wordle-meta" type="application/json">
+        {{ {"year": year, "month": month, "day": day} | tojson }}
+    </script>
+
+    {% if not word_unavailable %}
+    <script>
+        // If we arrived here from the archive (via a `back` link), return
+        // to that same archive page/month instead of always going home.
+        function goBack() {
+            const params = new URLSearchParams(window.location.search);
+            const back = params.get('back');
+            window.location.href = back ? decodeURIComponent(back) : '/';
+        }
+
+        const meta = JSON.parse(document.getElementById('wordle-meta').textContent);
+        const TARGET = "{{ target_word }}";
+        const WORD_LENGTH = TARGET.length;
+        const MAX_ATTEMPTS = {{ max_guesses }};
+
+        document.getElementById('board').style.setProperty('--word-length', WORD_LENGTH);
+
+        let currentRow = 0;
+        let currentTile = 0;
+        let guesses = [];          // submitted words, e.g. ["CRANE", "SLATE"]
+        let results = [];          // parallel array of result arrays, e.g. [["absent","present",...], ...]
+        let currentGuessLetters = Array(WORD_LENGTH).fill("");
+        let gameOver = false;
+        let isWon = false;
+
+        // --- Valid guess dictionary (fetched once, cached in memory) ---
+        let VALID_WORDS = null;
+        async function loadValidWords() {
+            try {
+                const res = await fetch('/api/wordle-valid-words');
+                const text = await res.text();
+                VALID_WORDS = new Set(
+                    text.split(/\s+/).filter(Boolean).map(w => w.toUpperCase())
+                );
+            } catch (e) {
+                console.error("Error loading valid word list:", e);
+                VALID_WORDS = new Set(); // fail closed: only TARGET will be accepted
+            }
+        }
+        loadValidWords();
+
+        // --- Header date label ---
+        (function renderDateLabel() {
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            document.getElementById('puzzle-date').textContent = label;
+        })();
+
+        // --- Build grid ---
+        const board = document.getElementById("board");
+        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+            const row = document.createElement("div");
+            row.className = "row";
+            for (let j = 0; j < WORD_LENGTH; j++) {
+                const tile = document.createElement("div");
+                tile.className = "tile";
+                tile.id = `tile-${i}-${j}`;
+                row.appendChild(tile);
+            }
+            board.appendChild(row);
+        }
+
+        // --- Build keyboard ---
+        const layout = [
+            ["Q","W","E","R","T","Y","U","I","O","P"],
+            ["A","S","D","F","G","H","J","K","L"],
+            ["ENTER","Z","X","C","V","B","N","M","DEL"]
+        ];
+
+        layout.forEach((row, i) => {
+            const container = document.getElementById(`k${i+1}`);
+            row.forEach(key => {
+                const btn = document.createElement("button");
+                btn.className = `key ${key.length > 1 ? 'wide' : ''}`;
+                btn.textContent = key === "DEL" ? "⌫" : key;
+                btn.dataset.key = key;
+                btn.onclick = () => handleKey(key);
+                container.appendChild(btn);
+            });
+        });
+
+        document.addEventListener("keydown", (e) => {
+            if (gameOver) return;
+            if (e.key === "Enter") handleKey("ENTER");
+            else if (e.key === "Backspace") handleKey("DEL");
+            else if (/^[a-zA-Z]$/.test(e.key)) handleKey(e.key.toUpperCase());
+        });
+
+        function updateGuessCounter() {
+            document.getElementById('guess-counter').textContent = `${guesses.length}/${MAX_ATTEMPTS}`;
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 2500);
+        }
+
+        function saveProgress() {
+            const saveUrl = `/api/progress/Wordle/${meta.year}/${meta.month}/${meta.day}`;
+            fetch(saveUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userGrid: { guesses: guesses, results: results },
+                    timerSeconds: guesses.length,   // repurposed for Wordle: number of guesses used
+                    ratio: guesses.length / MAX_ATTEMPTS,
+                    completed: gameOver,
+                    usedCheck: isWon   // repurposed for Wordle: true = won, false = lost
+                })
+            }).catch(e => console.error("Error saving progress:", e));
+        }
+
+        function computeResult(guess) {
+            const targetArr = TARGET.split("");
+            const result = Array(WORD_LENGTH).fill("absent");
+
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                if (guess[i] === targetArr[i]) {
+                    result[i] = "correct";
+                    targetArr[i] = null;
+                }
+            }
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                if (result[i] !== "correct" && targetArr.includes(guess[i])) {
+                    result[i] = "present";
+                    targetArr[targetArr.indexOf(guess[i])] = null;
+                }
+            }
+            return result;
+        }
+
+        function applyKeyboardState(guess, result) {
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                const keyBtn = document.querySelector(`.key[data-key="${guess[i]}"]`);
+                if (!keyBtn) continue;
+                const currentState = keyBtn.dataset.state;
+                if (result[i] === "correct" || (result[i] === "present" && currentState !== "correct")) {
+                    keyBtn.dataset.state = result[i];
+                } else if (!currentState) {
+                    keyBtn.dataset.state = result[i];
+                }
+            }
+        }
+
+        // Render a previously-submitted row instantly (no animation), used when resuming a game.
+        function renderSavedRow(rowIdx, guess, result) {
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                const tile = document.getElementById(`tile-${rowIdx}-${i}`);
+                tile.textContent = guess[i];
+                tile.dataset.state = result[i];
+            }
+            applyKeyboardState(guess, result);
+        }
+
+        function handleKey(key) {
+            if (gameOver) return;
+
+            if (key === "DEL") {
+                if (currentTile > 0) {
+                    currentTile--;
+                    currentGuessLetters[currentTile] = "";
+                    document.getElementById(`tile-${currentRow}-${currentTile}`).textContent = "";
+                }
+            } else if (key === "ENTER") {
+                if (currentTile === WORD_LENGTH) submitGuess();
+            } else if (currentTile < WORD_LENGTH && key.length === 1) {
+                currentGuessLetters[currentTile] = key;
+                document.getElementById(`tile-${currentRow}-${currentTile}`).textContent = key;
+                currentTile++;
+            }
+        }
+
+        function shakeCurrentRow() {
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                const tile = document.getElementById(`tile-${currentRow}-${i}`);
+                tile.classList.remove("shake");
+                void tile.offsetWidth; // force reflow so the animation restarts
+                tile.classList.add("shake");
+                tile.addEventListener("animationend", () => tile.classList.remove("shake"), { once: true });
+            }
+        }
+
+        function submitGuess() {
+            const guess = currentGuessLetters.join("");
+
+            if (VALID_WORDS === null) {
+                showToast("Still loading dictionary…");
+                return;
+            }
+            if (guess !== TARGET && !VALID_WORDS.has(guess)) {
+                shakeCurrentRow();
+                showToast("Not in word list");
+                return;
+            }
+
+            const result = computeResult(guess);
+
+            const STAGGER_DELAY = 250;
+            const FLIP_DURATION = 800;
+
+            for (let i = 0; i < WORD_LENGTH; i++) {
+                const tile = document.getElementById(`tile-${currentRow}-${i}`);
+                tile.style.animationDelay = `${i * STAGGER_DELAY}ms`;
+                tile.classList.add("flip");
+
+                setTimeout(() => {
+                    tile.dataset.state = result[i];
+                }, (i * STAGGER_DELAY) + (FLIP_DURATION / 2));
+            }
+
+            const totalAnimationTime = ((WORD_LENGTH - 1) * STAGGER_DELAY) + FLIP_DURATION + 100;
+            setTimeout(() => {
+                applyKeyboardState(guess, result);
+
+                guesses.push(guess);
+                results.push(result);
+                updateGuessCounter();
+
+                if (guess === TARGET) {
+                    finishGame(true);
+                } else if (currentRow === MAX_ATTEMPTS - 1) {
+                    finishGame(false);
+                } else {
+                    currentRow++;
+                    currentTile = 0;
+                    currentGuessLetters = Array(WORD_LENGTH).fill("");
+                    saveProgress();
+                }
+            }, totalAnimationTime);
+        }
+
+        function finishGame(won) {
+            gameOver = true;
+            isWon = won;
+            saveProgress();
+
+            if (won) {
+                showToast(`Solved in ${guesses.length}/${MAX_ATTEMPTS}!`);
+            } else {
+                showToast(`Out of guesses. Word was ${TARGET}`);
+            }
+            showResultModal(won);
+        }
+
+        function showResultModal(won) {
+            document.getElementById('modal-emoji').textContent = won ? '🎉' : '😔';
+            document.getElementById('modal-title').textContent = won ? 'Nice!' : 'So Close!';
+            document.getElementById('modal-subtitle').textContent = won
+                ? `Solved in ${guesses.length}/${MAX_ATTEMPTS} guesses`
+                : `Better luck tomorrow`;
+            document.getElementById('modal-word').textContent = TARGET;
+            document.getElementById('modal-guess-count').textContent = `${guesses.length}/${MAX_ATTEMPTS}`;
+            document.getElementById('result-modal').classList.remove('hidden');
+        }
+
+        function closeResultModal() {
+            document.getElementById('result-modal').classList.add('hidden');
+        }
+
+        function loadProgress() {
+            const loadUrl = `/api/progress/Wordle/${meta.year}/${meta.month}/${meta.day}`;
+            fetch(loadUrl).then(r => r.json()).then(saved => {
+                if (saved && saved.userGrid && saved.userGrid.guesses) {
+                    guesses = saved.userGrid.guesses;
+                    results = saved.userGrid.results || [];
+                    guesses.forEach((g, idx) => renderSavedRow(idx, g, results[idx]));
+                    currentRow = guesses.length;
+                    currentTile = 0;
+                    currentGuessLetters = Array(WORD_LENGTH).fill("");
+                }
+                updateGuessCounter();
+
+                if (saved && saved.completed) {
+                    gameOver = true;
+                    isWon = !!saved.usedCheck;
+                    if (isWon) {
+                        showToast(`Solved in ${guesses.length}/${MAX_ATTEMPTS}`);
+                    } else {
+                        showToast(`Word was ${TARGET}`);
+                    }
+                }
+            }).catch(e => {
+                console.error("Error loading progress:", e);
+            });
+        }
+
+        loadProgress();
+    </script>
+    {% endif %}
+</body>
+</html>

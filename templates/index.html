@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>Crossword Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'media'
+        }
+
+        const todayTitles = {{ today_titles | tojson }};
+    </script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #f4f6f8;
+            color: #0f172a;
+            margin: 0;
+            padding-bottom: 115px;
+        }
+        @media (prefers-color-scheme: dark) {
+            body { background-color: #1c1c1e; color: #f1f5f9; }
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            display: flex;
+            justify-content: flex-start;
+            padding: 0;
+            box-sizing: border-box;
+            scrollbar-width: none;
+        }
+        .table-responsive::-webkit-scrollbar { display: none; }
+
+        @media (min-width: 1250px) {
+            .table-responsive { justify-content: center; }
+            .header-bar { max-width: 1218px; margin: 0 auto; width: 100%; }
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 300px repeat(6, 140px) 140px;
+            gap: 14px;
+            align-items: center;
+            min-width: 1246px;
+            padding: 0 14px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            position: relative;
+            border: none;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: filter 0.2s ease;
+            height: 140px;
+            padding: 18px;
+            box-sizing: border-box;
+            display: flex;
+            color: #0f172a;
+        }
+        .card:hover { filter: brightness(0.95); }
+
+        .card.primary {
+            display: flex;
+            flex-direction: row;
+            text-align: left;
+        }
+
+        .primary-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: 6px;
+            height: 100%;
+            padding-right: 84px;
+        }
+
+        .primary-title { font-size: 1.5rem; font-weight: 800; line-height: 1.1; }
+        .primary-subtitle {font-size: 1rem; font-weight: 500; opacity: 0.6; line-height: 1.1; }
+        .primary-date { font-size: 1rem; font-weight: 600; opacity: 0.85; margin-top: auto; }
+
+        .card-img-container {
+            position: absolute;
+            top: 18px;
+            width: 76px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 12px;
+        }
+
+        .card.primary .card-img-container { right: 18px; }
+
+        .card-img-container img {
+            width: 76px;
+            height: 76px;
+            object-fit: contain;
+        }
+
+        .stat-label {
+            font-size: 0.68rem;
+            font-weight: 800;
+            opacity: 0.85;
+            white-space: nowrap;
+            line-height: 1;
+        }
+
+        .card.small {
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            text-align: center;
+        }
+
+        .card.small .card-img-container {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .small-day {
+            font-size: 0.95rem;
+            font-weight: 700;
+            position: absolute;
+            bottom: 18px;
+        }
+
+        .small-stat {
+            font-size: 0.7rem;
+            font-weight: 800;
+            opacity: 0.85;
+            position: absolute;
+            bottom: 6px;
+        }
+
+        .circle-btn {
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            background-color: #e2e8f0;
+            color: #0f172a;
+        }
+        @media (prefers-color-scheme: dark) {
+            .circle-btn { background-color: #3f3f46; color: #f1f5f9; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- View 1: Puzzles Tab -->
+    <div id="tab-puzzles" class="tab-content">
+        <div class="header-bar py-4 px-4">
+            <h1 id="greeting" class="text-2xl font-black text-slate-900 dark:text-white">Good Morning</h1>
+        </div>
+        <div id="container" class="flex flex-col gap-3.5 w-full"></div>
+    </div>
+
+    <!-- View 2: Friends Tab -->
+    <div id="tab-friends" class="tab-content hidden p-4 max-w-xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h1 class="text-2xl font-black text-slate-900 dark:text-white">Friends Leaderboard</h1>
+            <input type="date" id="friends-date-picker" onchange="loadLeaderboard()" class="px-3 py-1.5 border border-slate-300 dark:border-neutral-700 rounded-lg text-sm font-medium bg-white dark:bg-neutral-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Puzzle Type Sub-Tabs -->
+        <div class="flex bg-slate-200/80 dark:bg-neutral-800 p-1 rounded-xl mb-4 text-xs font-bold">
+            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition">The Crossword</button>
+            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">The Midi</button>
+            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">The Mini</button>
+            <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Wordle</button>
+        </div>
+
+        <!-- Leaderboard Users List -->
+        <div id="leaderboard-list" class="space-y-2.5"></div>
+    </div>
+
+    <!-- View 3: User / Account Tab -->
+    <div id="tab-account" class="tab-content hidden p-4 max-w-xl mx-auto space-y-6">
+        <h1 class="text-2xl font-black text-slate-900 dark:text-white">Profile & Stats</h1>
+
+        <!-- Profile Header & Avatar Selector -->
+        <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700">
+            <div class="flex items-center gap-4 mb-4">
+                <div id="account-avatar-display" class="w-16 h-16 bg-slate-100 dark:bg-neutral-700 rounded-full flex items-center justify-center text-3xl shadow-inner border border-slate-200 dark:border-neutral-600">🧩</div>
+                <div>
+                    <div id="account-username-display" class="text-xl font-black text-slate-900 dark:text-white"></div>
+                    <span class="text-xs font-semibold text-slate-400 dark:text-neutral-500">Tap below to change avatar</span>
+                </div>
+            </div>
+
+            <!-- Avatar Grid Picker -->
+            <div class="flex flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-neutral-700">
+                <button onclick="selectAvatar('🧩')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🧩</button>
+                <button onclick="selectAvatar('🦁')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🦁</button>
+                <button onclick="selectAvatar('🦊')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🦊</button>
+                <button onclick="selectAvatar('🦉')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🦉</button>
+                <button onclick="selectAvatar('🐼')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🐼</button>
+                <button onclick="selectAvatar('🐱')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🐱</button>
+                <button onclick="selectAvatar('🐶')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🐶</button>
+                <button onclick="selectAvatar('🚀')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🚀</button>
+                <button onclick="selectAvatar('🧠')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🧠</button>
+                <button onclick="selectAvatar('⚡')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">⚡</button>
+                <button onclick="selectAvatar('🎯')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">🎯</button>
+                <button onclick="selectAvatar('👑')" class="w-9 h-9 rounded-lg bg-slate-100 dark:bg-neutral-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-lg flex items-center justify-center transition">👑</button>
+            </div>
+        </div>
+
+        <!-- Solve Time Statistics -->
+        <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700 space-y-4">
+            <h2 class="text-base font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide text-xs">Your Averages</h2>
+
+            <!-- Quick Averages: Mini, Midi & Wordle -->
+            <div class="grid grid-cols-3 gap-3">
+                <div class="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-blue-600 dark:text-blue-400 mb-1">The Mini</div>
+                    <div id="stat-mini-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
+                    <div id="stat-mini-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 solved</div>
+                </div>
+                <div class="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1">The Midi</div>
+                    <div id="stat-midi-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
+                    <div id="stat-midi-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 solved</div>
+                </div>
+                <div class="bg-purple-50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-purple-600 dark:text-purple-400 mb-1">Wordle</div>
+                    <div id="stat-wordle-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
+                    <div id="stat-wordle-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 played</div>
+                </div>
+            </div>
+
+            <!-- Detailed Crossword Averages by Day of the Week -->
+            <div>
+                <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">The Crossword (By Day of Week)</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm" id="crossword-days-grid">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Wordle Guess Distribution -->
+            <div>
+                <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">Wordle Guess Distribution</h3>
+                <div class="space-y-1.5" id="wordle-guess-distribution">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Account Controls -->
+        <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700 space-y-4">
+            <div class="space-y-2">
+                <label class="block text-xs font-bold text-slate-500 dark:text-neutral-400">Change Username</label>
+                <div class="flex gap-2">
+                    <input type="text" id="new-username-input" placeholder="New username" class="flex-1 px-3 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button onclick="changeUsername()" class="bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">Save</button>
+                </div>
+                <p id="username-msg" class="text-xs hidden"></p>
+            </div>
+
+            <hr class="border-slate-100 dark:border-neutral-700">
+
+            <button onclick="logout()" class="w-full bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 font-bold py-2.5 rounded-lg border border-red-200 dark:border-red-900 transition text-sm">
+                Log Out
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating Bottom Navigation Bar -->
+    <nav class="fixed bottom-7 left-1/2 -translate-x-1/2 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md rounded-full border border-slate-200/80 dark:border-neutral-700/80 shadow-2xl flex items-center gap-4 px-3 py-2 z-50">
+        <button onclick="switchTab('puzzles')" id="btn-tab-puzzles" class="flex flex-col items-center px-4 py-1.5 rounded-full bg-blue-600 text-white shadow-sm transition-all duration-200">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+            </svg>
+            <span class="text-[11px] font-bold tracking-tight mt-0.5">Puzzles</span>
+        </button>
+        <button onclick="switchTab('friends')" id="btn-tab-friends" class="flex flex-col items-center px-4 py-1.5 rounded-full text-slate-500 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-white transition-all duration-200">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+            </svg>
+            <span class="text-[11px] font-bold tracking-tight mt-0.5">Friends</span>
+        </button>
+        <button onclick="switchTab('account')" id="btn-tab-account" class="flex flex-col items-center px-4 py-1.5 rounded-full text-slate-500 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-white transition-all duration-200">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+            </svg>
+            <span class="text-[11px] font-bold tracking-tight mt-0.5">User</span>
+        </button>
+    </nav>
+
+    <script>
+        let userProgressMap = {};
+        let currentUsername = '';
+        let currentAvatar = '🧩';
+        let currentFriendsSubTab = 'normal';
+
+        function updateGreeting(username) {
+            const currentHour = new Date().getHours();
+            const greetingElement = document.getElementById('greeting');
+            let prefix = "Good Evening";
+
+            if (4 < currentHour && currentHour < 12) {
+                prefix = "Good Morning";
+            } else if (12 <= currentHour && currentHour < 17) {
+                prefix = "Good Afternoon";
+            }
+
+            greetingElement.textContent = username ? `${prefix}, ${username[0].toUpperCase() + username.slice(1)}` : prefix;
+        }
+
+        function formatTime(totalSecs) {
+            if (!totalSecs || totalSecs <= 0) return "--";
+            const m = Math.floor(totalSecs / 60);
+            const s = totalSecs % 60;
+            const h = Math.floor(m / 60);
+            const rm = m % 60;
+            if (h > 0) {
+                return `${h}:${rm.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+
+            ['puzzles', 'friends', 'account'].forEach(name => {
+                const btn = document.getElementById(`btn-tab-${name}`);
+                if (name === tabName) {
+                    btn.className = 'flex flex-col items-center px-4 py-1.5 rounded-full bg-blue-600 text-white shadow-sm transition-all duration-200';
+                } else {
+                    btn.className = 'flex flex-col items-center px-4 py-1.5 rounded-full text-slate-500 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-white transition-all duration-200';
+                }
+            });
+
+            if (tabName === 'friends') loadLeaderboard();
+            if (tabName === 'account') loadUserStats();
+        }
+
+        function switchFriendsSubTab(type) {
+            currentFriendsSubTab = type;
+            ['normal', 'midi', 'mini', 'wordle'].forEach(t => {
+                const btn = document.getElementById(`subtab-${t}`);
+                if (t === type) {
+                    btn.className = 'flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition';
+                } else {
+                    btn.className = 'flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition';
+                }
+            });
+            loadLeaderboard();
+        }
+
+        async function init() {
+            const res = await fetch('/api/me');
+            if (!res.ok) {
+                window.location.href = '/login';
+                return;
+            }
+            const data = await res.json();
+            currentUsername = data.username;
+            currentAvatar = data.avatar || '🧩';
+
+            updateGreeting(currentUsername);
+
+            document.getElementById('account-username-display').textContent = `@${data.username}`;
+            document.getElementById('account-avatar-display').textContent = currentAvatar;
+
+            await loadUserProgress();
+        }
+
+        async function selectAvatar(avatarEmoji) {
+            const res = await fetch('/api/change-avatar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ avatar: avatarEmoji })
+            });
+
+            if (res.ok) {
+                currentAvatar = avatarEmoji;
+                document.getElementById('account-avatar-display').textContent = avatarEmoji;
+            }
+        }
+
+        async function loadLeaderboard() {
+            const dateInput = document.getElementById('friends-date-picker');
+
+            // Ensure the date picker always has a local date value
+            if (!dateInput.value) {
+                const now = new Date();
+                dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            }
+
+            const dateVal = dateInput.value;
+            const container = document.getElementById('leaderboard-list');
+            container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">Loading leaderboard...</div>';
+
+            const res = await fetch(`/api/friends/leaderboard?type=${currentFriendsSubTab}&date=${dateVal}`);
+            if (!res.ok) {
+                container.innerHTML = '<div class="text-center text-red-500 dark:text-red-400 py-4 text-sm">Failed to load leaderboard</div>';
+                return;
+            }
+
+            let users = await res.json();
+            if (!users || users.length === 0) {
+                container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">No activity recorded for this day yet.</div>';
+                return;
+            }
+
+            if (currentFriendsSubTab === 'wordle') {
+                // For Wordle, "completed" includes both wins and losses, so rank
+                // winners first (fewest guesses, then fastest), then losers, then
+                // in-progress, then not-started - rather than sorting everyone
+                // who "completed" (won or lost) purely by time.
+                const rank3 = u => u.completed && u.usedCheck ? 0 : (u.completed ? 1 : (u.hasStarted ? 2 : 3));
+                users = [...users].sort((a, b) => {
+                    const r = rank3(a) - rank3(b);
+                    if (r !== 0) return r;
+                    if (rank3(a) === 0) {
+                        const ga = a.timerSeconds || 6, gb = b.timerSeconds || 6;
+                        if (ga !== gb) return ga - gb;
+                        return a.username.localeCompare(b.username);
+                    }
+                    return a.username.localeCompare(b.username);
+                });
+            }
+
+            let html = '';
+            let rank = 1;
+
+            users.forEach(u => {
+                let statusBadge = '';
+                if (u.completed && currentFriendsSubTab === 'wordle') {
+                    // usedCheck is repurposed for Wordle: true = won, false = lost.
+                    // timerSeconds is repurposed to hold the number of guesses used.
+                    const won = u.usedCheck;
+                    const badgeBg = won ? 'bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900';
+                    const guessCount = u.timerSeconds || 6;
+                    const icon = won ? `✓ Won` : '✗ Lost';
+                    statusBadge = `
+                        <div class="text-right">
+                            <div class="font-black text-slate-800 dark:text-white text-base">${won ? `${guessCount}/6` : '6/6'}</div>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeBg}">${icon}</span>
+                        </div>
+                    `;
+                } else if (u.completed) {
+                    const badgeBg = u.usedCheck ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300' : 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900';
+                    const icon = u.usedCheck ? '✓' : '★ Gold';
+                    statusBadge = `
+                        <div class="text-right">
+                            <div class="font-black text-slate-800 dark:text-white text-base">${formatTime(u.timerSeconds)}</div>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeBg}">${icon}</span>
+                        </div>
+                    `;
+                } else if (u.hasStarted) {
+                    const pct = Math.round((u.ratio || 0) * 100);
+                    statusBadge = `
+                        <div class="text-right">
+                            <div class="text-xs font-bold text-slate-500 dark:text-neutral-400">In Progress</div>
+                            <span class="text-[11px] font-semibold text-blue-600 dark:text-blue-400">${pct}% solved</span>
+                        </div>
+                    `;
+                } else {
+                    statusBadge = `
+                        <div class="text-right">
+                            <span class="text-xs font-medium text-slate-400 dark:text-neutral-500">Not started</span>
+                        </div>
+                    `;
+                }
+
+                const isRanked = currentFriendsSubTab === 'wordle' ? (u.completed && u.usedCheck) : u.completed;
+                const rankDisplay = isRanked ? `<span class="w-5 text-xs font-black text-slate-400 dark:text-neutral-500">#${rank++}</span>` : `<span class="w-5"></span>`;
+
+                html += `
+                    <div class="flex items-center justify-between bg-white dark:bg-neutral-800 p-3.5 rounded-2xl border border-slate-200 dark:border-neutral-700 shadow-sm">
+                        <div class="flex items-center gap-3">
+                            ${rankDisplay}
+                            <div class="w-10 h-10 rounded-full bg-slate-100 dark:bg-neutral-700 flex items-center justify-center text-xl shadow-inner border border-slate-200 dark:border-neutral-600">
+                                ${u.avatar || '🧩'}
+                            </div>
+                            <div>
+                                <div class="font-bold text-slate-800 dark:text-slate-100 text-sm">${u.username} ${u.username === currentUsername ? '<span class="text-[10px] bg-slate-100 dark:bg-neutral-700 px-1.5 py-0.5 rounded text-slate-500 dark:text-neutral-300 font-bold ml-1">You</span>' : ''}</div>
+                            </div>
+                        </div>
+                        ${statusBadge}
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        async function loadUserStats() {
+            const res = await fetch('/api/user/stats');
+            if (!res.ok) return;
+
+            const stats = await res.json();
+
+            document.getElementById('stat-mini-avg').textContent = formatTime(stats.miniAvg);
+            document.getElementById('stat-mini-count').textContent = `${stats.miniCount} solved`;
+
+            document.getElementById('stat-midi-avg').textContent = formatTime(stats.midiAvg);
+            document.getElementById('stat-midi-count').textContent = `${stats.midiCount} solved`;
+
+            document.getElementById('stat-wordle-avg').textContent = (stats.wordleAvg !== null && stats.wordleAvg !== undefined) ? `${stats.wordleAvg}` : '--';
+            const winRateStr = (stats.wordleWinRate !== null && stats.wordleWinRate !== undefined) ? ` &middot; ${stats.wordleWinRate}% won` : '';
+            document.getElementById('stat-wordle-count').innerHTML = `${stats.wordleCount} played${winRateStr}`;
+
+            const daysGrid = document.getElementById('crossword-days-grid');
+            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+            let html = '';
+            daysOrder.forEach(day => {
+                const dayData = stats.crosswordByDay[day] || { avg: null, count: 0 };
+                const timeStr = formatTime(dayData.avg);
+                html += `
+                    <div class="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-neutral-900 rounded-xl border border-slate-100 dark:border-neutral-700">
+                        <span class="font-semibold text-slate-700 dark:text-neutral-300 text-xs">${day}</span>
+                        <div class="text-right">
+                            <span class="font-bold text-slate-800 dark:text-white text-sm">${timeStr}</span>
+                            <span class="text-[10px] text-slate-400 dark:text-neutral-500 block">${dayData.count} solved</span>
+                        </div>
+                    </div>
+                `;
+            });
+            daysGrid.innerHTML = html;
+
+            renderWordleGuessDistribution(stats.wordleGuessDistribution || {});
+        }
+
+        function renderWordleGuessDistribution(dist) {
+            const container = document.getElementById('wordle-guess-distribution');
+            const counts = [1, 2, 3, 4, 5, 6].map(n => dist[String(n)] || 0);
+            const maxCount = Math.max(1, ...counts);
+            const totalCount = counts.reduce((a, b) => a + b, 0);
+
+            if (totalCount === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-400 dark:text-neutral-500">No solved Wordles yet.</p>';
+                return;
+            }
+
+            let html = '';
+            counts.forEach((count, i) => {
+                const n = i + 1;
+                const pct = Math.round((count / maxCount) * 100);
+                html += `
+                    <div class="flex items-center gap-2">
+                        <span class="w-4 text-xs font-bold text-slate-500 dark:text-neutral-400">${n}</span>
+                        <div class="flex-1 h-5 bg-slate-100 dark:bg-neutral-900 rounded-md overflow-hidden">
+                            <div class="h-full bg-purple-400 dark:bg-purple-600 rounded-md transition-all" style="width: ${count > 0 ? Math.max(pct, 6) : 0}%;"></div>
+                        </div>
+                        <span class="w-5 text-xs font-semibold text-slate-500 dark:text-neutral-400 text-right">${count}</span>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+
+        async function changeUsername() {
+            const input = document.getElementById('new-username-input');
+            const msg = document.getElementById('username-msg');
+            const newUsername = input.value.trim();
+
+            if (!newUsername) return;
+
+            const res = await fetch('/api/change-username', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: newUsername })
+            });
+            const data = await res.json();
+
+            msg.classList.remove('hidden', 'text-red-600', 'dark:text-red-400', 'text-green-600', 'dark:text-green-400');
+            if (res.ok) {
+                currentUsername = data.username;
+                document.getElementById('account-username-display').textContent = `@${data.username}`;
+                input.value = '';
+                msg.textContent = 'Username updated successfully!';
+                msg.classList.add('text-green-600', 'dark:text-green-400');
+            } else {
+                msg.textContent = data.error || 'Failed to update username';
+                msg.classList.add('text-red-600', 'dark:text-red-400');
+            }
+        }
+
+        async function loadUserProgress() {
+            const res = await fetch('/api/progress');
+            if (res.ok) {
+                userProgressMap = await res.json();
+                renderRows();
+            }
+        }
+
+        // Spelling Bee's progress icons are keyed by rank tier rather than a
+        // plain 0-9 fill bucket.
+        const BEE_RANK_PCTS = [0, 0.02, 0.05, 0.08, 0.15, 0.25, 0.40, 0.50, 0.70, 1.00];
+        function beeRankIndexFromRatio(ratio) {
+            let idx = 0;
+            for (let i = 0; i < BEE_RANK_PCTS.length; i++) {
+                if (ratio >= BEE_RANK_PCTS[i]) idx = i;
+            }
+            return idx;
+        }
+        // Maps a rank index (0-9) to one of the 9 progress-N.svg files
+        // (0 = not started, 8 = Queen Bee). Beginner/Good Start share an
+        // image, as do Moving Up/Good and Nice/Great.
+        function beeProgressImageIndex(rankIdx) {
+            if (rankIdx <= 1) return 1;
+            if (rankIdx <= 3) return 2;
+            if (rankIdx === 4) return 3;
+            if (rankIdx <= 6) return 4;
+            if (rankIdx === 7) return 5;
+            if (rankIdx === 8) return 6;
+            return 8; // Queen Bee
+        }
+
+        function getProgressImage(typeFolder, key) {
+            const progress = userProgressMap[key];
+            if (!progress || (!progress.ratio && !progress.completed)) {
+                return `static/${typeFolder}/progress-0.svg`;
+            }
+
+            if (typeFolder === 'spelling-bee') {
+                const ratio = progress.completed ? 1 : (progress.ratio || 0);
+                const rankIdx = beeRankIndexFromRatio(ratio);
+                return `static/spelling-bee/progress-${beeProgressImageIndex(rankIdx)}.svg`;
+            }
+
+            if (progress.completed) {
+                if (typeFolder === 'wordle') {
+                    // usedCheck is repurposed for Wordle: true = won, false = lost
+                    return `static/wordle/${progress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
+                }
+                return `static/${typeFolder}/${progress.usedCheck ? 'complete' : 'complete-gold'}.svg`;
+            }
+
+            if (typeFolder === 'wordle') {
+                // ratio is guessesUsed/6, so this reconstructs the exact guess
+                // count (0-5) rather than bucketing it like the fill-ratio types below.
+                const guessesUsed = Math.min(5, Math.round((progress.ratio || 0) * 6));
+                return `static/wordle/progress-${guessesUsed}.svg`;
+            }
+
+            const maxIdx = (typeFolder === 'mini') ? 4 : 9;
+            let idx;
+
+            if (progress.ratio >= 1.0) {
+                idx = maxIdx;
+            } else {
+                idx = Math.min(maxIdx - 1, Math.floor(progress.ratio * maxIdx));
+            }
+
+            return `static/${typeFolder}/progress-${idx}.svg`;
+        }
+
+        // Small label shown beneath the icon once a puzzle is completed:
+        // solve time for crosswords, guess count (or "Lost") for Wordle.
+        function getStatLabel(typeFolder, key) {
+            const progress = userProgressMap[key];
+            if (!progress || !progress.completed) return '';
+
+            if (typeFolder === 'wordle') {
+                // usedCheck: won/lost. timerSeconds is repurposed to hold guesses used.
+                if (progress.usedCheck) {
+                    const guesses = (progress.timerSeconds != null) ? progress.timerSeconds : Math.round((progress.ratio || 0) * 6);
+                    return `${guesses}/6`;
+                }
+                return 'Lost';
+            }
+
+            if (typeFolder === 'spelling-bee') {
+                // timerSeconds is repurposed for Spelling Bee to hold the score.
+                return `${progress.timerSeconds ?? 0} pts`;
+            }
+
+            return formatTime(progress.timerSeconds);
+        }
+
+        function playPuzzle(publisher, year, month, dayKey) {
+            if (publisher === 'Wordle') {
+                window.location.href = `/wordle/${year}/${month}/${dayKey}`;
+                return;
+            }
+            if (publisher === 'SpellingBee') {
+                window.location.href = `/spelling-bee/${year}/${month}/${dayKey}`;
+                return;
+            }
+            window.location.href = `/play/${encodeURIComponent(publisher)}/${year}/${month}/${encodeURIComponent(dayKey)}`;
+        }
+
+        function escapeAttr(str) { return String(str).replace(/'/g, "\\'"); }
+
+        const rowConfigs = [
+            { publisher: 'NY Times', puzzleName: 'The Crossword', suffix: '',      bgColor: 'background-color: #6593e6;', typeFolder: 'normal' },
+            { publisher: 'NY Times', puzzleName: 'The Midi',      suffix: '-midi', bgColor: 'background-color: #7ca8f1;', typeFolder: 'midi' },
+            { publisher: 'NY Times', puzzleName: 'The Mini',      suffix: '-mini', bgColor: 'background-color: #96bdfa;', typeFolder: 'mini' },
+            { publisher: 'SpellingBee', puzzleName: 'Spelling Bee', suffix: '',    bgColor: 'background-color: #f7da21;', typeFolder: 'spelling-bee' },
+            { publisher: 'Wordle',   puzzleName: 'Wordle',        suffix: '',      bgColor: 'background-color: #d4d6da;', typeFolder: 'wordle' },
+        ];
+
+        function renderRows() {
+            const container = document.getElementById('container');
+            const today = new Date();
+            let allRowsHTML = '';
+
+            rowConfigs.forEach(config => {
+                let rowHtml = '<div class="table-responsive"><div class="row">';
+
+                for (let i = 0; i < 7; i++) {
+                    const currentDate = new Date(today);
+                    currentDate.setDate(today.getDate() - i);
+
+                    const isToday = (i === 0);
+                    const year = currentDate.getFullYear();
+                    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+                    const dayNum = currentDate.getDate();
+                    const baseDayKey = String(dayNum).padStart(2, '0');
+                    const dayKey = baseDayKey + config.suffix;
+                    const onclick = `playPuzzle('${escapeAttr(config.publisher)}', '${year}', '${month}', '${escapeAttr(dayKey)}')`;
+
+                    const key = `${config.publisher}/${year}/${month}/${dayKey}`;
+                    const imgSrc = getProgressImage(config.typeFolder, key);
+                    const statLabel = getStatLabel(config.typeFolder, key);
+
+                    const weekdayFull = currentDate.toLocaleDateString('en-US', { weekday: 'long' });
+
+                    if (isToday) {
+                        const monthShort = currentDate.toLocaleDateString('en-US', { month: 'short' });
+                        const dateString = `${weekdayFull}, ${dayNum} ${monthShort}`;
+                        const subtitle = todayTitles[config.typeFolder] || "";
+
+                        rowHtml += `
+                            <button onclick="${onclick}" class="card primary" style="${config.bgColor}">
+                                <div class="primary-content">
+                                    <span class="primary-title">${config.puzzleName}</span>
+                                    <span class="primary-subtitle">${subtitle}</span>
+                                    <span class="primary-date">${dateString}</span>
+                                </div>
+                                <div class="card-img-container">
+                                    <img src="${imgSrc}" alt="Icon" onerror="this.style.display='none'">
+                                    ${statLabel ? `<span class="stat-label">${statLabel}</span>` : ''}
+                                </div>
+                            </button>
+                        `;
+                    } else {
+                        rowHtml += `
+                            <button onclick="${onclick}" class="card small" style="${config.bgColor}">
+                                <div class="card-img-container">
+                                    <img src="${imgSrc}" alt="Icon" onerror="this.style.display='none'">
+                                </div>
+                                <span class="small-day">${weekdayFull}</span>
+                                ${statLabel ? `<span class="small-stat">${statLabel}</span>` : ''}
+                            </button>
+                        `;
+                    }
+                }
+
+                rowHtml += `<button class="circle-btn" onclick="window.location.href='/archive/${config.typeFolder}'">➔</button>`;
+                rowHtml += '</div></div>';
+                allRowsHTML += rowHtml;
+            });
+
+            const connectsCardHTML = `
+                <div class="table-responsive mt-3 mb-6">
+                    <div class="row" style="grid-template-columns: 300px;">
+                        <button onclick="window.location.href='https://www.nytimes.com/games/connections'" class="card primary" style="background-color: #b2a7f9;">
+                            <div class="primary-content">
+                                <span class="primary-title">Connections</span>
+                                <span class="primary-subtitle">Play in the app</span>
+                            </div>
+                            <div class="card-img-container">
+                                <img src="static/connections.svg" alt="Icon" onerror="this.style.display='none'">
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            allRowsHTML += connectsCardHTML;
+            container.innerHTML = allRowsHTML;
+        }
+
+        init();
+    </script>
+</body>
+</html>
