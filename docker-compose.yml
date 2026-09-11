@@ -10,7 +10,7 @@ services:
       FLASK_SECRET_KEY: a65cb14fb41dd3022ee2827ad9d71e164a29d222a679ad99cc77677c8444ed45
       PYTHONPATH: /app
     volumes:
-      - /opt/app_data/crossword:/app/data
+      - /opt/appdata/crossword:/app/data
     ports:
       - "5235:5235"
     command: >
@@ -31,6 +31,6 @@ services:
       # needed for Wordle or Spelling Bee scrapers - those are free).
       NYT_S_COOKIE: ${NYT_S_COOKIE:-}
     volumes:
-      - /opt/app_data/crossword:/app/data
+      - /opt/appdata/crossword:/app/data
     # Default CMD from the Dockerfile (cron-entrypoint.sh) runs cron in the
     # foreground on the schedule in docker/crontab.

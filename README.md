@@ -4,7 +4,7 @@ Two folders here, matching your convention:
 
 ```
 stacks/crossword/        -> goes to /opt/stacks/crossword       (code + compose)
-app_data/crossword/      -> goes to /opt/app_data/crossword     (persistent data)
+appdata/crossword/      -> goes to /opt/appdata/crossword     (persistent data)
 ```
 
 ## 1. File structure
@@ -40,7 +40,7 @@ crossword/
     └── cron-entrypoint.sh         # snapshots env vars, starts cron
 ```
 
-### `/opt/app_data/crossword/` (the data - bind-mounted into both containers as `/app/data`)
+### `/opt/appdata/crossword/` (the data - bind-mounted into both containers as `/app/data`)
 
 ```
 crossword/
@@ -85,11 +85,11 @@ app.py**. The code lives at `/app` (baked into the image); the data lives at
 
 ```bash
 # 1. Create the folders
-sudo mkdir -p /opt/stacks/crossword /opt/app_data/crossword
+sudo mkdir -p /opt/stacks/crossword /opt/appdata/crossword
 
 # 2. Copy the files there (from wherever you extracted this)
 sudo cp -r stacks/crossword/. /opt/stacks/crossword/
-sudo cp -r app_data/crossword/. /opt/app_data/crossword/
+sudo cp -r appdata/crossword/. /opt/appdata/crossword/
 
 # 3. Build and start
 docker compose up -d --build
@@ -101,7 +101,7 @@ Then visit `http://<your-server>:5235`.
 
 ```bash
 # tail scraper logs
-tail -f /opt/app_data/crossword/logs/cron.log
+tail -f /opt/appdata/crossword/logs/cron.log
 
 # check the cron schedule loaded correctly
 docker compose exec scraper crontab -l
