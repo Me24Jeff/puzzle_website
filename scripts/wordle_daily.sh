@@ -5,8 +5,11 @@ set -uo pipefail
 
 cd /app/data || exit 1
 
-echo "=== $(date -Is) wordle_daily.sh starting ==="
+# Calculate tomorrow's date
+TARGET_DATE=$(date -d "+1 day" +%F)
 
-python3 /app/scrapers/wordle_scraper.py --output puzzles/wordle_words.txt || { echo "=== $(date -Is) ERROR: Wordle scraper failed ==="; exit 1; }
+echo "=== $(date -Is) wordle_daily.sh starting for ${TARGET_DATE} ==="
+
+python3 /app/scrapers/wordle_scraper.py --date "$TARGET_DATE" --output puzzles/wordle_words.txt || { echo "=== ERROR: Wordle scraper failed ==="; exit 1; }
 
 echo "=== $(date -Is) wordle_daily.sh done ==="

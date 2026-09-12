@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     working_dir: /app/data
     environment:
-      TZ: America/New_York
+      TZ: Asia/Jerusalem
       FLASK_SECRET_KEY: a65cb14fb41dd3022ee2827ad9d71e164a29d222a679ad99cc77677c8444ed45
       PYTHONPATH: /app
     volumes:

@@ -5,12 +5,15 @@ set -uo pipefail
 
 cd /app/data || exit 1
 
-echo "=== $(date -Is) crosswords_daily.sh starting ==="
+# Calculate tomorrow's date (standard for Linux/Docker containers)
+TARGET_DATE=$(date -d "+1 day" +%F)
+
+echo "=== $(date -Is) crosswords_daily.sh starting for ${TARGET_DATE} ==="
 if [ -z "${NYT_S_COOKIE:-}" ]; then
     echo "  ! NYT_S_COOKIE not set - skipping crossword scrape (needs an NYT Games subscription cookie)."
     exit 1
 else
-    python3 /app/scrapers/crossword_scraper.py --type all --output-dir puzzles/crosswords || { echo "=== ERROR: Crossword scraper failed ==="; exit 1; }
+    python3 /app/scrapers/crossword_scraper.py --type all --date "$TARGET_DATE" --output-dir puzzles/crosswords || { echo "=== ERROR: Crossword scraper failed ==="; exit 1; }
 fi
 
 echo "=== $(date -Is) crosswords_daily.sh done ==="

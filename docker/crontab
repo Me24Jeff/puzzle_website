@@ -6,7 +6,7 @@
 
 # Wordle flips at midnight local time (which is around 5pm ET)
 # Run at 17:10 to give their systems a few minutes of buffer.
-10  17  *  *  *  root  /app/scripts/wordle_daily.sh >> /app/data/logs/cron.log 2>&1
+10  18  *  *  *  root  /app/scripts/wordle_daily.sh >> /app/data/logs/cron.log 2>&1
 
 # Daily/Mini/Midi crosswords: NYT flips these at 10pm ET the night before on Tuesday - Saturday and at 6pm ET the night before on Monday and Sunday.
 10  22  *  *  2-6   root /app/scripts/crosswords_daily.sh >> /app/data/logs/cron.log 2>&1

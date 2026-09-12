@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Configure system timezone from the TZ environment variable if set
+if [ -n "${TZ:-}" ]; then
+  ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+  echo "$TZ" > /etc/timezone
+fi
+
 # cron jobs run in a minimal environment and do NOT inherit the container's
 # env vars (NYT_S_COOKIE, XWORDS_REPO_URL, etc). Snapshot them once here to
 # a file that every script sources before it runs.
