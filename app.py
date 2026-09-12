@@ -869,42 +869,53 @@ def index():
     if 'user_id' not in session:
         return redirect('/login')
 
-    # Pre-fetch today's titles for the cards so templates have them instantly
     today = datetime.now()
     year = str(today.year)
     month = f"{today.month:02d}"
     day_base = f"{today.day:02d}"
+    today_date = today.date()
 
     today_titles = {}
+    # Whether each type's *today* entry has actually been scraped yet. The
+    # scrapers fire on cron schedules in America/New_York (docker/crontab)
+    # while this container's clock is on a different TZ (see
+    # docker-compose.yml), so "today" here can roll over before/after the
+    # scraper has written that day's file. Checking the data directly stays
+    # correct regardless of either timezone.
+    today_available = {}
     master = get_master_index()
     meta = get_data(0, 22, 78)
     header = get_data(*meta[5:8], mode='raw')
 
     for p_type, cfg in TYPE_FOLDER_CONFIG.items():
         if p_type == 'wordle':
+            today_available[p_type] = get_wordle_word_for_date(today_date) is not None
             today_titles[p_type] = "Guess your way to the correct word."
             continue
-        if p_type == 'mini':
-            today_titles[p_type] = "Solve the puzzle in seconds."
-            continue
         if p_type == 'spelling-bee':
+            today_available[p_type] = get_spelling_bee_puzzle(today_date) is not None
             today_titles[p_type] = "Make as many words as you can with 7 letters."
             continue
 
         day_key = day_base + cfg['suffix']
         publisher = cfg['publisher']
+        found = False
+        title_text = "Crack the clues in today's puzzle."
         try:
             info = master[publisher][year][month][day_key]
             puz_data = get_data(*info, mode='gzip', header=header)
-            today_titles[p_type] = f"“{get_puzzle_title(puz_data)}”"
+            title_text = f"“{get_puzzle_title(puz_data)}”"
+            found = True
         except Exception:
             fallback = load_fallback_puzzle_json(publisher, year, month, day_key)
             if fallback is not None:
-                today_titles[p_type] = f"“{fallback.get('title') or 'Crack the clues in todays puzzle.'}”"
-            else:
-                today_titles[p_type] = "Crack the clues in today's puzzle."
+                title_text = f"“{fallback.get('title') or 'Crack the clues in todays puzzle.'}”"
+                found = True
 
-    return render_template('index.html', today_titles=today_titles)
+        today_available[p_type] = found
+        today_titles[p_type] = "Solve the puzzle in seconds." if p_type == 'mini' else title_text
+
+    return render_template('index.html', today_titles=today_titles, today_available=today_available)
 
 @app.route('/play/<publisher>/<year>/<month>/<path:day_key>')
 def play_puzzle(publisher, year, month, day_key):

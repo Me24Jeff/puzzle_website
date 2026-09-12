@@ -8,6 +8,14 @@
 
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+            });
+        }
+    </script>
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -254,16 +262,16 @@
         {{ {"year": year, "month": month, "day": day} | tojson }}
     </script>
 
-    {% if not word_unavailable %}
     <script>
-        // If we arrived here from the archive (via a `back` link), return
-        // to that same archive page/month instead of always going home.
         function goBack() {
             const params = new URLSearchParams(window.location.search);
             const back = params.get('back');
             window.location.href = back ? decodeURIComponent(back) : '/';
         }
+    </script>
 
+    {% if not word_unavailable %}
+    <script>
         const meta = JSON.parse(document.getElementById('wordle-meta').textContent);
         const TARGET = "{{ target_word }}";
         const WORD_LENGTH = TARGET.length;

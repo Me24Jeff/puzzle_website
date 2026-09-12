@@ -8,9 +8,17 @@
 
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+            });
+        }
+    </script>
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
-    
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
@@ -22,8 +30,8 @@
         tailwind.config = {
             darkMode: 'media'
         }
-
         const todayTitles = {{ today_titles | tojson }};
+        const todayAvailable = {{ today_available | tojson }};
     </script>
     <style>
         body {
@@ -752,10 +760,13 @@
                     if (isToday) {
                         const monthShort = currentDate.toLocaleDateString('en-US', { month: 'short' });
                         const dateString = `${weekdayFull}, ${dayNum} ${monthShort}`;
-                        const subtitle = todayTitles[config.typeFolder] || "";
+                        const isAvailable = todayAvailable[config.typeFolder] !== false;
+                        const subtitle = isAvailable ? (todayTitles[config.typeFolder] || "") : "Not available yet";
+                        const clickAttr = isAvailable ? `onclick="${onclick}"` : 'disabled';
+                        const cardClass = isAvailable ? 'card primary' : 'card primary opacity-50 cursor-default';
 
                         rowHtml += `
-                            <button onclick="${onclick}" class="card primary" style="${config.bgColor}">
+                            <button ${clickAttr} class="${cardClass}" style="${config.bgColor}">
                                 <div class="primary-content">
                                     <span class="primary-title">${config.puzzleName}</span>
                                     <span class="primary-subtitle">${subtitle}</span>
@@ -763,7 +774,7 @@
                                 </div>
                                 <div class="card-img-container">
                                     <img src="${imgSrc}" alt="Icon" onerror="this.style.display='none'">
-                                    ${statLabel ? `<span class="stat-label">${statLabel}</span>` : ''}
+                                    ${isAvailable && statLabel ? `<span class="stat-label">${statLabel}</span>` : ''}
                                 </div>
                             </button>
                         `;

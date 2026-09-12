@@ -8,6 +8,14 @@
 
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+            });
+        }
+    </script>
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -313,17 +321,19 @@
         {{ {"year": year, "month": month, "day": day} | tojson }}
     </script>
 
-    {% if not puzzle_unavailable %}
-    <script id="bee-puzzle" type="application/json">
-        {{ puzzle | tojson }}
-    </script>
     <script>
         function goBack() {
             const params = new URLSearchParams(window.location.search);
             const back = params.get('back');
             window.location.href = back ? decodeURIComponent(back) : '/';
         }
+    </script>
 
+    {% if not puzzle_unavailable %}
+    <script id="bee-puzzle" type="application/json">
+        {{ puzzle | tojson }}
+    </script>
+    <script>
         const meta = JSON.parse(document.getElementById('bee-meta').textContent);
         const PUZZLE = JSON.parse(document.getElementById('bee-puzzle').textContent);
 
