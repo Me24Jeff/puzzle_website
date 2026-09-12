@@ -11,13 +11,13 @@ services:
       PYTHONPATH: /app
     volumes:
       - /opt/appdata/crossword:/app/data
-    ports:
-      - "5235:5235"
     command: >
       gunicorn app:app
       --bind 0.0.0.0:5235
       --workers 2
       --timeout 60
+    networks:
+     - reverse-proxy
 
   scraper:
     build: .
@@ -34,3 +34,7 @@ services:
       - /opt/appdata/crossword:/app/data
     # Default CMD from the Dockerfile (cron-entrypoint.sh) runs cron in the
     # foreground on the schedule in docker/crontab.
+
+networks:
+  reverse-proxy:
+    external: true

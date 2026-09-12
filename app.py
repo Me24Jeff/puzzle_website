@@ -4,7 +4,7 @@ from datetime import datetime, date
 import os, gzip, json, sqlite3
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', ece0f05ebddc786379eb4db9cd8c868ae2c310970b602bf6d436a4a3f97833bc)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'ece0f05ebddc786379eb4db9cd8c868ae2c310970b602bf6d436a4a3f97833bc')
 
 PUZZLE_DIR = "puzzles/xwords"
 DB_PATH = "puzzle_progress.db"
