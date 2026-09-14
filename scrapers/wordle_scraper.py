@@ -29,7 +29,7 @@ from datetime import date, timedelta
 
 import requests
 
-WORDLE_API = "https://www.nytimes.com/svc/wordle/v2/{sdate}.json"
+WORDLE_API = "https://www.nytimes.com/svc/wordle/v2/{date}.json"
 RECORD_SIZE = 17
 DEFAULT_OUTPUT = "puzzles/wordle_words.txt"
 

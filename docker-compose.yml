@@ -29,7 +29,7 @@ services:
       TZ: America/New_York
       # NYT-S session cookie, required for daily/mini/midi crosswords (NOT
       # needed for Wordle or Spelling Bee scrapers - those are free).
-      NYT_S_COOKIE: ${NYT_S_COOKIE:-}
+      NYT_S_COOKIE: 0^CCESLQjK6qPLBhCmxI_VBhoSMS2jXekCV7ROKIV5rLWY8TENINyEuHc48dzLsgZCABpAVcqGoRjF4c6iSPBO9CiKxsSK4BMil73kUxGaJ9Fi5Wr75xs2KAF52kgzJNeSaCTKAJsZljhPmhLnIQVLT_03Bw==
     volumes:
       - /opt/appdata/crossword:/app/data
     # Default CMD from the Dockerfile (cron-entrypoint.sh) runs cron in the

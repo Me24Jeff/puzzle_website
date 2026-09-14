@@ -3,7 +3,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date
 import os, gzip, json, sqlite3
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="/app/data/static", static_url_path="/static")
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'ece0f05ebddc786379eb4db9cd8c868ae2c310970b602bf6d436a4a3f97833bc')
 
 PUZZLE_DIR = "puzzles/xwords"
