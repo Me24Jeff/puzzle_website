@@ -1,0 +1,13 @@
+<script>
+    // Service worker (served from /sw.js so it covers the whole site) +
+    // cleanup of the old /static/sw.js registration, which could only
+    // ever control /static/.
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+            regs.forEach(r => { if (r.scope.endsWith('/static/')) r.unregister(); });
+        }).catch(() => {});
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+        });
+    }
+</script>

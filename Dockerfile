@@ -13,6 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY sw.js .
 COPY templates/ templates/
 COPY scrapers/ scrapers/
 COPY scripts/ scripts/

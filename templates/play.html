@@ -9,13 +9,7 @@
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-            });
-        }
-    </script>
+    {% include '_sw.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -333,6 +327,10 @@
         {{ {"publisher": publisher, "year": year, "month": month, "day_key": day_key} | tojson }}
     </script>
 
+    <script id="boot-data" type="application/json">
+        {{ boot | tojson }}
+    </script>
+
     <script>
         // If we arrived here from the archive (via a `back` link), return
         // to that same archive page/month instead of always going home.
@@ -379,8 +377,10 @@
                 if (!puzzleFinished) {
                     timerSeconds++;
                     updateTimerDisplay();
-                    if (timerSeconds % 5 === 0) {
-                        saveProgress();
+                    // Edits are saved as they happen (see markDirty); this only
+                    // covers time passing while nothing is being typed.
+                    if (timerSeconds % 60 === 0) {
+                        flushSave();
                     }
                 }
             }, 1000);
@@ -393,11 +393,40 @@
             }
         }
 
-        function saveProgress() {
+        // ---- Saving -------------------------------------------------------
+        // Progress used to be POSTed on every keystroke AND every 5 seconds.
+        // Now: edits are batched (at most one save per SAVE_DELAY_MS while
+        // typing), the clock is saved once a minute, and anything pending is
+        // flushed when the tab is hidden/closed. Completion saves immediately.
+        const SAVE_DELAY_MS = 3000;
+        let dirty = false;
+        let saveTimer = null;
+        let lastSavedSeconds = -1;
+        let hasSavedRow = false;   // a progress row already exists on the server
+
+        function markDirty() {
             if (!puzzle) return;
+            dirty = true;
+            if (!saveTimer) saveTimer = setTimeout(() => flushSave(), SAVE_DELAY_MS);
+        }
+
+        function timerNeedsSave() {
+            return !puzzleFinished && (currentRatio > 0 || hasSavedRow) && timerSeconds !== lastSavedSeconds;
+        }
+
+        function flushSave(keepalive) {
+            if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+            if (!puzzle) return;
+            if (!dirty && !timerNeedsSave()) return;
+
+            dirty = false;
+            lastSavedSeconds = timerSeconds;
+            hasSavedRow = true;
+
             const saveUrl = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
             fetch(saveUrl, {
                 method: 'POST',
+                keepalive: !!keepalive,   // lets the request finish while the page unloads
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     userGrid: userGrid,
@@ -406,8 +435,18 @@
                     completed: puzzleFinished,
                     usedCheck: usedCheck
                 })
-            }).catch(e => console.error("Error saving progress:", e));
+            }).then(r => {
+                if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+            }).catch(e => {
+                dirty = true;   // try again next time
+                console.error("Error saving progress:", e);
+            });
         }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flushSave(true);
+        });
+        window.addEventListener('pagehide', () => flushSave(true));
 
         function formatTime(totalSecs) {
             const m = Math.floor(totalSecs / 60);
@@ -435,7 +474,7 @@
             setTimeout(() => { toast.remove(); }, 2500);
         }
 
-        function checkProgressAndCompletion() {
+        function checkProgressAndCompletion(persist = true) {
             let filledCount = 0;
             let totalCells = 0;
             let isCorrect = true;
@@ -462,8 +501,10 @@
 
             currentRatio = totalCells > 0 ? (filledCount / totalCells) : 0;
 
+            let justFinished = false;
             if (isCorrect && !puzzleFinished) {
                 puzzleFinished = true;
+                justFinished = true;
                 stopTimer();
 
                 try {
@@ -487,7 +528,12 @@
                 }
             }
 
-            saveProgress();
+            if (justFinished) {
+                dirty = true;
+                flushSave();          // leaderboard should see a finish right away
+            } else if (persist) {
+                markDirty();
+            }
         }
 
         function closeVictoryModal() {
@@ -538,66 +584,70 @@
         }
 
         function loadPuzzle() {
-            const url = `/api/puzzle-json/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
-            fetch(url).then(r => r.json()).then(data => {
-                if (data.error) {
-                    document.getElementById('status').textContent = `Couldn't load this puzzle: ${data.error}`;
-                    return;
-                }
-                puzzle = data;
-                document.getElementById('puzzle-title').textContent = puzzle.title || '';
-                document.title = puzzle.title || document.title;
+            // The server embeds both the puzzle and this user's saved progress
+            // in the page, so there is nothing to fetch here.
+            let boot = null;
+            try { boot = JSON.parse(document.getElementById('boot-data').textContent); } catch (e) {}
+            if (!boot || boot.error || !boot.puzzle) {
+                document.getElementById('status').textContent =
+                    `Couldn't load this puzzle: ${(boot && boot.error) || 'unknown error'}`;
+                return;
+            }
 
-                userGrid = Array.from({length: puzzle.height}, () => Array(puzzle.width).fill(null));
+            puzzle = boot.puzzle;
+            const saved = boot.saved || {};
+            hasSavedRow = Object.keys(saved).length > 0;
 
-                puzzle.clues.across.forEach(c => c.cells.forEach(([x, y]) => acrossMap[cellKey(x, y)] = c));
-                puzzle.clues.down.forEach(c => c.cells.forEach(([x, y]) => downMap[cellKey(x, y)] = c));
-                puzzle.clues.across.concat(puzzle.clues.down).forEach(c => {
-                    numberMap[cellKey(c.col, c.row)] = c.number;
-                });
+            document.getElementById('puzzle-title').textContent = puzzle.title || '';
+            document.title = puzzle.title || document.title;
 
-                const loadUrl = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
-                fetch(loadUrl).then(r => r.json()).then(saved => {
-                    if (saved.userGrid) userGrid = saved.userGrid;
-                    if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
-                    if (saved.usedCheck) usedCheck = saved.usedCheck;
-                    if (saved.completed) puzzleFinished = saved.completed;
+            userGrid = Array.from({length: puzzle.height}, () => Array(puzzle.width).fill(null));
 
-                    // Recalculate grid ratio immediately on load before any auto-saves run
-                    checkProgressAndCompletion();
-
-                    // Display stored elapsed time in header
-                    updateTimerDisplay();
-
-                    outer:
-                    for (let y = 0; y < puzzle.height; y++) {
-                        for (let x = 0; x < puzzle.width; x++) {
-                            if (!puzzle.grid[y][x].block) {
-                                curRow = y; curCol = x;
-                                direction = acrossMap[cellKey(x, y)] ? 'across' : 'down';
-                                break outer;
-                            }
-                        }
-                    }
-
-                    buildGridDom();
-                    buildKeyboard();
-                    buildDesktopCluesList();
-                    initKeyboardVisibility();
-
-                    // Start clock if active, or display final solve banner if completed
-                    if (!puzzleFinished) {
-                        startTimer();
-                    } else {
-                        showToast(`Puzzle Completed in ${formatTime(timerSeconds)}`);
-                    }
-
-                    document.getElementById('status').classList.add('hidden');
-                    document.getElementById('grid').classList.remove('hidden');
-                    applyZoomAtPoint(1);
-                    render();
-                });
+            puzzle.clues.across.forEach(c => c.cells.forEach(([x, y]) => acrossMap[cellKey(x, y)] = c));
+            puzzle.clues.down.forEach(c => c.cells.forEach(([x, y]) => downMap[cellKey(x, y)] = c));
+            puzzle.clues.across.concat(puzzle.clues.down).forEach(c => {
+                numberMap[cellKey(c.col, c.row)] = c.number;
             });
+
+            if (Array.isArray(saved.userGrid) && saved.userGrid.length === puzzle.height) userGrid = saved.userGrid;
+            if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
+            if (saved.usedCheck) usedCheck = saved.usedCheck;
+            if (saved.completed) puzzleFinished = saved.completed;
+            lastSavedSeconds = timerSeconds;
+
+            // Recalculate grid ratio immediately on load (without re-saving)
+            checkProgressAndCompletion(false);
+
+            // Display stored elapsed time in header
+            updateTimerDisplay();
+
+            outer:
+            for (let y = 0; y < puzzle.height; y++) {
+                for (let x = 0; x < puzzle.width; x++) {
+                    if (!puzzle.grid[y][x].block) {
+                        curRow = y; curCol = x;
+                        direction = acrossMap[cellKey(x, y)] ? 'across' : 'down';
+                        break outer;
+                    }
+                }
+            }
+
+            buildGridDom();
+            buildKeyboard();
+            buildDesktopCluesList();
+            initKeyboardVisibility();
+
+            // Start clock if active, or display final solve banner if completed
+            if (!puzzleFinished) {
+                startTimer();
+            } else {
+                showToast(`Puzzle Completed in ${formatTime(timerSeconds)}`);
+            }
+
+            document.getElementById('status').classList.add('hidden');
+            document.getElementById('grid').classList.remove('hidden');
+            applyZoomAtPoint(1);
+            render();
         }
 
         function buildGridDom() {

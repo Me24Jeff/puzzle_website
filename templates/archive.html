@@ -9,13 +9,7 @@
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-            });
-        }
-    </script>
+    {% include '_sw.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -32,6 +26,9 @@
         }
         // Which tab to open on load, set by the /archive/<type_folder> route.
         const INITIAL_CATEGORY = {{ (initial_type or 'midi') | tojson }};
+        // Progress / available days / start month (/ Wordle range) for the first
+        // tab + month shown, embedded by the server so the page needs no API calls.
+        const ARCHIVE_BOOT = {{ (boot or none) | tojson }};
     </script>
     <style>
         html, body {
@@ -246,6 +243,7 @@
 
         let currentCategory = (typeof INITIAL_CATEGORY !== 'undefined' && CATEGORIES[INITIAL_CATEGORY]) ? INITIAL_CATEGORY : 'midi';
         let currentDate = new Date();
+        currentDate.setDate(1);   // avoid day-of-month overflow when changing months
 
         // If we were sent here from the archive's own puzzle list (via the
         // `back` link from play/wordle), land back on the same month/year
@@ -298,8 +296,7 @@
 
         function onSelectMonthYear(val) {
             const [y, m] = val.split('-').map(Number);
-            currentDate.setFullYear(y);
-            currentDate.setMonth(m);
+            currentDate = new Date(y, m, 1);
             loadArchiveDataAndRender();
         }
 
@@ -319,6 +316,44 @@
             loadArchiveDataAndRender();
         }
 
+        // ---- Data loading -------------------------------------------------
+        // One request returns everything needed for a (type, month): the user's
+        // progress, which days have puzzles, the type's start month and (for
+        // Wordle) its date range. The first bundle is embedded in the page; later
+        // ones are fetched once and then kept in memory, so flipping between
+        // tabs/months you've already seen costs nothing.
+        const bundleCache = new Map();
+        const bundleKey = (cat, y, m1) => `${cat}/${y}/${m1}`;
+
+        function rememberBundle(b) {
+            bundleCache.set(bundleKey(b.type, b.year, b.month), b);
+            const now = new Date();
+            startCache[b.type] = {
+                year: (b.range && b.range.startYear) || now.getFullYear(),
+                // Backend month is 1-indexed; Date uses 0-indexed.
+                month: (b.range && b.range.startMonth) ? (b.range.startMonth - 1) : 0
+            };
+            if (b.type === 'wordle') {
+                wordleRange = (b.wordleRange && b.wordleRange.startDate)
+                    ? b.wordleRange : { startDate: null, endDate: null };
+            }
+        }
+
+        if (typeof ARCHIVE_BOOT !== 'undefined' && ARCHIVE_BOOT) rememberBundle(ARCHIVE_BOOT);
+
+        async function getBundle(cat, year, month1) {
+            const key = bundleKey(cat, year, month1);
+            if (bundleCache.has(key)) return bundleCache.get(key);
+
+            const res = await fetch(`/api/archive-progress/${cat}/${year}/${month1}`);
+            if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthorized'); }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const b = await res.json();
+            b.type = cat; b.year = year; b.month = month1;
+            rememberBundle(b);
+            return b;
+        }
+
         function switchCategory(catKey) {
             if (!CATEGORIES[catKey]) catKey = 'midi';
             currentCategory = catKey;
@@ -334,41 +369,7 @@
                 window.history.replaceState(null, '', newPath);
             }
 
-            if (catKey === 'wordle' && wordleRange === null) {
-                fetch('/api/wordle-range')
-                    .then(res => res.json())
-                    .then(data => {
-                        wordleRange = data.startDate ? data : { startDate: null, endDate: null };
-                        renderCalendar();
-                    })
-                    .catch(() => { wordleRange = { startDate: null, endDate: null }; renderCalendar(); });
-            }
-
-            const applyRangeAndLoad = () => {
-                populateMonthYearDropdown();
-                loadArchiveDataAndRender();
-            };
-
-            if (startCache[catKey] !== undefined) {
-                applyRangeAndLoad();
-            } else {
-                fetch(`/api/archive-range/${catKey}`)
-                    .then(res => res.json())
-                    .then(data => {
-                        const now = new Date();
-                        startCache[catKey] = {
-                            year: data.startYear || now.getFullYear(),
-                            // Backend month is 1-indexed; Date uses 0-indexed.
-                            month: data.startMonth ? (data.startMonth - 1) : 0
-                        };
-                        applyRangeAndLoad();
-                    })
-                    .catch(() => {
-                        const now = new Date();
-                        startCache[catKey] = { year: now.getFullYear(), month: now.getMonth() };
-                        applyRangeAndLoad();
-                    });
-            }
+            loadArchiveDataAndRender(true);
         }
 
         // Set of day-of-month numbers with a real puzzle for the currently
@@ -376,25 +377,47 @@
         // whose availability is a contiguous range handled separately).
         let availableDaysThisMonth = null;
 
-        function loadArchiveDataAndRender() {
+        async function loadArchiveDataAndRender(repopulateDropdown) {
+            const cat = currentCategory;
             const year = currentDate.getFullYear();
-            const month = currentDate.getMonth() + 1;
+            const month1 = currentDate.getMonth() + 1;
 
-            const url = `/api/archive-progress/${currentCategory}/${year}/${month}`;
+            let bundle = null;
+            try {
+                bundle = await getBundle(cat, year, month1);
+            } catch (err) {
+                console.error('Failed to load archive data:', err);
+            }
 
-            fetch(url)
-                .then(res => res.json())
-                .then(data => {
-                    archiveProgressData = data.progress || {};
-                    availableDaysThisMonth = data.availableDays ? new Set(data.availableDays) : null;
-                    renderCalendar();
-                })
-                .catch(err => {
-                    archiveProgressData = {};
-                    availableDaysThisMonth = null;
-                    renderCalendar();
-                });
+            // The user may have switched tab/month while this was loading.
+            if (cat !== currentCategory ||
+                year !== currentDate.getFullYear() ||
+                month1 !== currentDate.getMonth() + 1) return;
+
+            if (bundle) {
+                archiveProgressData = bundle.progress || {};
+                availableDaysThisMonth = bundle.availableDays ? new Set(bundle.availableDays) : null;
+            } else {
+                archiveProgressData = {};
+                availableDaysThisMonth = null;
+                if (startCache[cat] === undefined) {
+                    const now = new Date();
+                    startCache[cat] = { year: now.getFullYear(), month: now.getMonth() };
+                }
+            }
+
+            if (repopulateDropdown) populateMonthYearDropdown();
+            renderCalendar();
         }
+
+        // Restored from the back/forward cache (e.g. after playing a puzzle):
+        // the in-memory data is stale, so reload it.
+        window.addEventListener('pageshow', (e) => {
+            if (e.persisted) {
+                bundleCache.clear();
+                loadArchiveDataAndRender(false);
+            }
+        });
 
         // Mirrors index.html's getProgressImage(), so archive icons look
         // exactly like the ones on the dashboard.

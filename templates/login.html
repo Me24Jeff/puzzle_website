@@ -9,13 +9,7 @@
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-            });
-        }
-    </script>
+    {% include '_sw.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -43,11 +37,11 @@
         <form id="auth-form" onsubmit="handleSubmit(event)" class="space-y-4">
             <div>
                 <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Username</label>
-                <input type="text" id="username" required class="w-full px-4 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="text" id="username" required autocomplete="username" autocapitalize="none" class="w-full px-4 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             <div>
                 <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
-                <input type="password" id="password" required class="w-full px-4 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="password" required autocomplete="current-password" class="w-full px-4 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             <button type="submit" id="submit-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition">
                 Log In
@@ -71,6 +65,7 @@
             document.getElementById('toggle-btn').textContent = isLogin
                 ? "Don't have an account? Sign Up"
                 : "Already have an account? Log In";
+            document.getElementById('password').autocomplete = isLogin ? 'current-password' : 'new-password';
             document.getElementById('error-msg').classList.add('hidden');
         }
 

@@ -9,13 +9,7 @@
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-            });
-        }
-    </script>
+    {% include '_sw.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -273,6 +267,8 @@
     {% if not word_unavailable %}
     <script>
         const meta = JSON.parse(document.getElementById('wordle-meta').textContent);
+        // This user's saved guesses for the day, embedded by the server (no fetch needed).
+        const SAVED = {{ (saved or {}) | tojson }};
         const TARGET = "{{ target_word }}";
         const WORD_LENGTH = TARGET.length;
         const MAX_ATTEMPTS = {{ max_guesses }};
@@ -291,7 +287,10 @@
         let VALID_WORDS = null;
         async function loadValidWords() {
             try {
+                // Served with a long Cache-Control + ETag, so after the first
+                // visit this is answered from the browser cache.
                 const res = await fetch('/api/wordle-valid-words');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const text = await res.text();
                 VALID_WORDS = new Set(
                     text.split(/\s+/).filter(Boolean).map(w => w.toUpperCase())
@@ -376,6 +375,8 @@
                     completed: gameOver,
                     usedCheck: isWon   // repurposed for Wordle: true = won, false = lost
                 })
+            }).then(r => {
+                if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
             }).catch(e => console.error("Error saving progress:", e));
         }
 
@@ -527,30 +528,26 @@
         }
 
         function loadProgress() {
-            const loadUrl = `/api/progress/Wordle/${meta.year}/${meta.month}/${meta.day}`;
-            fetch(loadUrl).then(r => r.json()).then(saved => {
-                if (saved && saved.userGrid && saved.userGrid.guesses) {
-                    guesses = saved.userGrid.guesses;
-                    results = saved.userGrid.results || [];
-                    guesses.forEach((g, idx) => renderSavedRow(idx, g, results[idx]));
-                    currentRow = guesses.length;
-                    currentTile = 0;
-                    currentGuessLetters = Array(WORD_LENGTH).fill("");
-                }
-                updateGuessCounter();
+            const saved = SAVED;
+            if (saved && saved.userGrid && saved.userGrid.guesses) {
+                guesses = saved.userGrid.guesses;
+                results = saved.userGrid.results || [];
+                guesses.forEach((g, idx) => renderSavedRow(idx, g, results[idx]));
+                currentRow = guesses.length;
+                currentTile = 0;
+                currentGuessLetters = Array(WORD_LENGTH).fill("");
+            }
+            updateGuessCounter();
 
-                if (saved && saved.completed) {
-                    gameOver = true;
-                    isWon = !!saved.usedCheck;
-                    if (isWon) {
-                        showToast(`Solved in ${guesses.length}/${MAX_ATTEMPTS}`);
-                    } else {
-                        showToast(`Word was ${TARGET}`);
-                    }
+            if (saved && saved.completed) {
+                gameOver = true;
+                isWon = !!saved.usedCheck;
+                if (isWon) {
+                    showToast(`Solved in ${guesses.length}/${MAX_ATTEMPTS}`);
+                } else {
+                    showToast(`Word was ${TARGET}`);
                 }
-            }).catch(e => {
-                console.error("Error loading progress:", e);
-            });
+            }
         }
 
         loadProgress();

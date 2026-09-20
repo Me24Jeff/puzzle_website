@@ -1,10 +1,86 @@
-from flask import Flask, render_template, jsonify, request, session, redirect, Response
+from flask import (Flask, render_template, jsonify, request, session, redirect,
+                   Response, send_from_directory)
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, date
-import os, gzip, json, sqlite3
+from datetime import datetime, date, timedelta
+from contextlib import contextmanager
+from functools import lru_cache
+import os, gzip, json, sqlite3, time, hashlib
 
 app = Flask(__name__, static_folder="/app/data/static", static_url_path="/static")
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'ece0f05ebddc786379eb4db9cd8c868ae2c310970b602bf6d436a4a3f97833bc')
+
+# ---------------------------------------------------------------------------
+# Secret key + session/cookie configuration
+# ---------------------------------------------------------------------------
+# The secret key signs the login cookie. If it changes (or differs between
+# gunicorn workers) everybody is logged out, so it must be stable. Order:
+#   1. $FLASK_SECRET_KEY, if set
+#   2. a key generated once and stored in <data dir>/.flask_secret_key
+# Nothing secret needs to live in the git repo any more.
+SECRET_KEY_FILE = ".flask_secret_key"
+
+
+def _load_secret_key():
+    env_key = os.environ.get('FLASK_SECRET_KEY')
+    if env_key:
+        return env_key
+
+    try:
+        with open(SECRET_KEY_FILE, 'r') as f:
+            key = f.read().strip()
+            if key:
+                return key
+    except FileNotFoundError:
+        pass
+
+    # First run: create the key atomically so two gunicorn workers starting at
+    # the same moment can't end up with different keys.
+    key = os.urandom(32).hex()
+    tmp = f"{SECRET_KEY_FILE}.{os.getpid()}.tmp"
+    with open(tmp, 'w') as f:
+        f.write(key)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    try:
+        os.link(tmp, SECRET_KEY_FILE)      # fails if another worker won the race
+    except FileExistsError:
+        pass
+    except OSError:                        # filesystem without hard links
+        if not os.path.exists(SECRET_KEY_FILE):
+            os.replace(tmp, SECRET_KEY_FILE)
+    finally:
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+    with open(SECRET_KEY_FILE, 'r') as f:
+        return f.read().strip()
+
+
+app.secret_key = _load_secret_key()
+
+# "Remember me": the login cookie is a *permanent* cookie that lasts a year and
+# is slid forward whenever the user is active (see keep_session_alive below).
+# Without this it is a browser-session cookie, which mobile browsers / iOS home
+# screen apps throw away after a short while.
+SESSION_LIFETIME = timedelta(days=365)
+SESSION_REFRESH_SECONDS = 24 * 60 * 60   # push the expiry forward at most once a day
+
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+    # We refresh manually (once a day) instead of re-sending Set-Cookie on
+    # every single response, including static files.
+    SESSION_REFRESH_EACH_REQUEST=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    # Only set COOKIE_SECURE=1 if you serve the site over HTTPS; a Secure
+    # cookie is silently dropped on plain http:// and nobody could log in.
+    SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE', '').lower() in ('1', 'true', 'yes'),
+    # Static files (icons/SVGs/etc.) may be cached by the browser for a week
+    # instead of being re-validated on every page view.
+    SEND_FILE_MAX_AGE_DEFAULT=timedelta(days=7),
+)
 
 PUZZLE_DIR = "puzzles/xwords"
 DB_PATH = "puzzle_progress.db"
@@ -17,10 +93,7 @@ DB_PATH = "puzzle_progress.db"
 # master archive, we check here before giving up.
 CROSSWORD_FALLBACK_DIR = "puzzles/crosswords"
 
-# Plain-text word list for Wordle. One word per line; the LAST line is
-# always today's word, and each line above it is the day before, so the
-# file is simply appended to once a day. Nothing in this app writes to
-# this file automatically - it's expected to be maintained externally.
+# Fixed-width word list for Wordle ("YYYY-MM-DD WORD\n", 17 bytes per record).
 WORDLE_WORDS_FILE = "puzzles/wordle_words.txt"
 WORDLE_MAX_GUESSES = 6
 
@@ -29,23 +102,57 @@ WORDLE_MAX_GUESSES = 6
 # client so it can validate guesses before accepting them.
 WORDLE_VALID_WORDS_FILE = "puzzles/valid_wordle_words.txt"
 
-# One JSON file per day, same idea as the Wordle word list but Spelling Bee
-# needs more than a single word so each day gets its own file instead of a
-# packed record. Layout: puzzles/spelling-bee/<year>/<month>/<day>.json
+# One JSON file per day. Layout: puzzles/spelling-bee/<year>/<month>/<day>.json
 SPELLING_BEE_DIR = "puzzles/spelling-bee"
 
-if not os.path.exists(PUZZLE_DIR):
-    os.makedirs(PUZZLE_DIR)
+# Puzzle type -> (publisher, day_key suffix). For the NY Times puzzles, the
+# publisher is always 'NY Times' and the puzzle type is encoded as a suffix
+# on the day_key. Wordle isn't from NY Times, so it gets its own publisher
+# instead of a suffix, but otherwise reuses the exact same progress schema.
+PUZZLE_PUBLISHER = 'NY Times'
+WORDLE_PUBLISHER = 'Wordle'
+SPELLING_BEE_PUBLISHER = 'SpellingBee'
+TYPE_FOLDER_CONFIG = {
+    'normal':       {'publisher': PUZZLE_PUBLISHER, 'suffix': '',},
+    'midi':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-midi',},
+    'mini':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-mini',},
+    'wordle':       {'publisher': WORDLE_PUBLISHER, 'suffix': '',},
+    'spelling-bee': {'publisher': SPELLING_BEE_PUBLISHER, 'suffix': '',},
+}
 
-if not os.path.exists(CROSSWORD_FALLBACK_DIR):
-    os.makedirs(CROSSWORD_FALLBACK_DIR)
+for _d in (PUZZLE_DIR, CROSSWORD_FALLBACK_DIR, SPELLING_BEE_DIR):
+    os.makedirs(_d, exist_ok=True)
 
-if not os.path.exists(SPELLING_BEE_DIR):
-    os.makedirs(SPELLING_BEE_DIR)
+
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
+@contextmanager
+def db():
+    """Open a connection, commit on success, and *always* close it.
+    (`with sqlite3.connect(...)` alone commits but never closes.)"""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        conn.execute('PRAGMA synchronous=NORMAL')
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
+    with db() as conn:
         cursor = conn.cursor()
+        # WAL lets readers and the (frequent) progress writes not block each
+        # other across the two gunicorn workers.
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.DatabaseError:
+            pass
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,11 +183,77 @@ def init_db():
                 PRIMARY KEY (user_id, publisher, year, month, day_key)
             )
         ''')
-        conn.commit()
+
 
 init_db()
 
+
+def get_user_info(user_id):
+    """{'username', 'avatar'} for a user id, or None if the user is gone."""
+    with db() as conn:
+        row = conn.execute('SELECT username, avatar FROM users WHERE id = ?', (user_id,)).fetchone()
+    if not row:
+        return None
+    return {'username': row[0], 'avatar': row[1] or '🧩'}
+
+
+def get_progress_summary(user_id, since=None):
+    """Lightweight per-day progress summary (no grids). `since` is an
+    'YYYY-MM-DD' string; when given, only days on/after it are returned, so
+    the dashboard doesn't download the user's entire history."""
+    sql = '''
+        SELECT publisher, year, month, day_key, ratio, completed, used_check, timer_seconds
+        FROM progress WHERE user_id = ?
+    '''
+    params = [user_id]
+    if since:
+        sql += " AND (year || '-' || month || '-' || substr(day_key, 1, 2)) >= ?"
+        params.append(since)
+
+    summary = {}
+    with db() as conn:
+        for row in conn.execute(sql, params):
+            key = f"{row[0]}/{row[1]}/{row[2]}/{row[3]}"
+            summary[key] = {
+                'ratio': row[4],
+                'completed': bool(row[5]),
+                'usedCheck': bool(row[6]),
+                # For crosswords this is elapsed solve time in seconds.
+                # For Wordle it's repurposed to hold the number of guesses used.
+                # For Spelling Bee it holds the score.
+                'timerSeconds': row[7]
+            }
+    return summary
+
+
+def get_saved_progress(user_id, publisher, year, month, day_key):
+    """The saved state for one puzzle (same shape the progress API returns)."""
+    with db() as conn:
+        row = conn.execute('''
+            SELECT user_grid, timer_seconds, ratio, completed, used_check
+            FROM progress WHERE user_id = ? AND publisher = ? AND year = ? AND month = ? AND day_key = ?
+        ''', (user_id, publisher, year, month, day_key)).fetchone()
+    if not row:
+        return {}
+    try:
+        grid = json.loads(row[0])
+    except (TypeError, ValueError):
+        grid = []
+    return {
+        'userGrid': grid,
+        'timerSeconds': row[1],
+        'ratio': row[2],
+        'completed': bool(row[3]),
+        'usedCheck': bool(row[4])
+    }
+
+
+# ---------------------------------------------------------------------------
+# Master puzzle archive (puzzles/xwords)
+# ---------------------------------------------------------------------------
 MASTER_INDEX = None
+_HEADER = None
+
 
 def make_json_safe(obj):
     if isinstance(obj, bytes):
@@ -91,15 +264,18 @@ def make_json_safe(obj):
         return [make_json_safe(item) for item in obj]
     return obj
 
+
 def get_data(num, start, length, mode='json', header=None):
     filename = os.path.join(PUZZLE_DIR, f"xwords_data_{num:02d}.dat")
-    if os.path.exists(filename):
+    # Read only the bytes we need. (This used to read the whole multi-MB .dat
+    # file into memory and then slice a few KB out of it, on every request.)
+    try:
         with open(filename, 'rb') as f:
-            full_chunk = f.read()
-    else:
+            f.seek(start)
+            data = f.read(length)
+    except FileNotFoundError:
         raise FileNotFoundError(f"Puzzle data file {filename} not found locally.")
 
-    data = full_chunk[start:start+length]
     if header is not None:
         data = header + data
 
@@ -113,14 +289,24 @@ def get_data(num, start, length, mode='json', header=None):
     else:
         raise Exception("Invalid mode")
 
+
+def get_header():
+    """Shared gzip header for every puzzle in the archive - read once."""
+    global _HEADER
+    if _HEADER is None:
+        meta = get_data(0, 22, 78)
+        _HEADER = get_data(*meta[5:8], mode='raw')
+    return _HEADER
+
+
 def get_master_index():
     global MASTER_INDEX
     if MASTER_INDEX is None:
         meta = get_data(0, 22, 78)
-        header = get_data(*meta[5:8], mode='raw')
-        raw_index = get_data(*meta[2:5], mode='gzip', header=header)
+        raw_index = get_data(*meta[2:5], mode='gzip', header=get_header())
         MASTER_INDEX = make_json_safe(raw_index)
     return MASTER_INDEX
+
 
 def build_puzzle_json(name, puz_data):
     width, height, cells, clues = puz_data[0], puz_data[1], puz_data[2], puz_data[3]
@@ -176,9 +362,38 @@ def build_puzzle_json(name, puz_data):
         "clues": {"across": across, "down": down},
     }
 
+
 def get_puzzle_title(puz_data):
     meta = puz_data[6] if len(puz_data) > 6 else {}
     return meta.get("title") or "Crack the clues in today's puzzle."
+
+
+@lru_cache(maxsize=256)
+def _load_master_puzzle(publisher, year, month, day_key):
+    """Puzzle from the historical archive. These never change, so the built
+    JSON is memoised (exceptions - i.e. 'not in the archive' - aren't cached)."""
+    master = get_master_index()
+    info = master[publisher][year][month][day_key]
+    puz_data = get_data(*info, mode='gzip', header=get_header())
+    return build_puzzle_json(f"{publisher} - {year}-{month}-{day_key}", puz_data)
+
+
+_TITLE_CACHE = {}
+
+
+def _master_title(publisher, year, month, day_key):
+    key = (publisher, year, month, day_key)
+    if key in _TITLE_CACHE:
+        return _TITLE_CACHE[key]
+    master = get_master_index()
+    info = master[publisher][year][month][day_key]
+    puz_data = get_data(*info, mode='gzip', header=get_header())
+    title = get_puzzle_title(puz_data)
+    if len(_TITLE_CACHE) > 64:
+        _TITLE_CACHE.clear()
+    _TITLE_CACHE[key] = title
+    return title
+
 
 # --- Fallback folder helpers (scraped puzzles not in the master archive) ---
 
@@ -186,6 +401,7 @@ def fallback_puzzle_path(publisher, year, month, day_key):
     return os.path.join(
         CROSSWORD_FALLBACK_DIR, publisher, str(int(year)), f"{int(month):02d}", f"{day_key}.json"
     )
+
 
 def load_fallback_puzzle_json(publisher, year, month, day_key):
     """Returns the pre-built puzzle JSON for a scraped puzzle, or None if
@@ -195,6 +411,17 @@ def load_fallback_puzzle_json(publisher, year, month, day_key):
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     return None
+
+
+def load_puzzle(publisher, year, month, day_key):
+    """Returns (puzzle_json_or_None, is_immutable). Master-archive puzzles are
+    immutable (safe to cache for a long time); scraped ones can be rewritten."""
+    try:
+        return _load_master_puzzle(publisher, year, month, day_key), True
+    except Exception:
+        pass  # Not in the master archive - fall through to the scraper's folder.
+    return load_fallback_puzzle_json(publisher, year, month, day_key), False
+
 
 def get_fallback_puzzle_days(publisher, suffix, year, month_padded):
     """Days (as ints) in the scraped-puzzle fallback folder for a given
@@ -223,8 +450,12 @@ def get_fallback_puzzle_days(publisher, suffix, year, month_padded):
             days.append(int(day_part))
     return days
 
+
+# ---------------------------------------------------------------------------
 # Wordle word-list helpers
+# ---------------------------------------------------------------------------
 RECORD_SIZE = 17  # "YYYY-MM-DD WORD\n" (10 + 1 + 5 + 1 = 17 bytes)
+
 
 def get_wordle_word_for_date(target_date: date) -> str | None:
     """Seeks directly to target date offset in O(1) time."""
@@ -284,28 +515,102 @@ def get_wordle_available_range():
         except ValueError:
             return None, None
 
+
 _VALID_WORDLE_WORDS_CACHE = None
+_VALID_WORDLE_WORDS_ETAG = None
+
 
 def get_valid_wordle_words_text():
     """Reads the newline-delimited valid-guess dictionary and caches it in
     memory so we don't hit disk on every request."""
-    global _VALID_WORDLE_WORDS_CACHE
+    global _VALID_WORDLE_WORDS_CACHE, _VALID_WORDLE_WORDS_ETAG
     if _VALID_WORDLE_WORDS_CACHE is None:
         if os.path.exists(WORDLE_VALID_WORDS_FILE):
             with open(WORDLE_VALID_WORDS_FILE, "r", encoding="utf-8") as f:
                 _VALID_WORDLE_WORDS_CACHE = f.read()
         else:
             _VALID_WORDLE_WORDS_CACHE = ""
+        _VALID_WORDLE_WORDS_ETAG = hashlib.md5(_VALID_WORDLE_WORDS_CACHE.encode('utf-8')).hexdigest()
     return _VALID_WORDLE_WORDS_CACHE
 
+
+# ---------------------------------------------------------------------------
+# Per-request hooks
+# ---------------------------------------------------------------------------
+_NO_SESSION_ENDPOINTS = ('static', 'service_worker')
+
+
+@app.before_request
+def keep_session_alive():
+    """Make logins persistent: upgrade any old browser-session cookie to a
+    year-long permanent one, and slide the expiry forward (at most once a
+    day) while the user keeps using the app."""
+    if request.endpoint in _NO_SESSION_ENDPOINTS or 'user_id' not in session:
+        return
+    now = int(time.time())
+    if not session.permanent or now - session.get('_t', 0) > SESSION_REFRESH_SECONDS:
+        session.permanent = True
+        session['_t'] = now
+
+
+_COMPRESSIBLE = {'text/html', 'text/plain', 'application/json', 'text/css',
+                 'application/javascript', 'image/svg+xml'}
+
+
+@app.after_request
+def optimize_response(resp):
+    if request.endpoint in _NO_SESSION_ENDPOINTS:
+        return resp
+
+    # HTML pages have per-user data (progress, name, ...) baked in, so they
+    # must never come back from the HTTP cache (e.g. on the back button).
+    if resp.mimetype == 'text/html':
+        resp.headers.setdefault('Cache-Control', 'private, no-store')
+
+    # gzip text responses (HTML, JSON, the Wordle dictionary...).
+    if (resp.status_code == 200
+            and not resp.direct_passthrough
+            and resp.mimetype in _COMPRESSIBLE
+            and 'Content-Encoding' not in resp.headers
+            and 'gzip' in request.headers.get('Accept-Encoding', '')):
+        data = resp.get_data()
+        if len(data) >= 500:
+            resp.set_data(gzip.compress(data, compresslevel=5))
+            resp.headers['Content-Encoding'] = 'gzip'
+            resp.headers.add('Vary', 'Accept-Encoding')
+    return resp
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Served from the site root so the worker's scope is the whole app (a
+    worker served from /static/ can only control /static/)."""
+    resp = send_from_directory(app.root_path, 'sw.js', mimetype='application/javascript')
+    resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Auth Routes
+# ---------------------------------------------------------------------------
+def _log_in(user_id):
+    session.clear()
+    session['user_id'] = user_id
+    session.permanent = True
+    session['_t'] = int(time.time())
+
+
 @app.route('/login')
 def login_page():
+    if 'user_id' in session:
+        return redirect('/')
     return render_template('login.html')
+
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
     password = data.get('password', '')
 
@@ -314,7 +619,7 @@ def register():
 
     hashed = generate_password_hash(password)
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with db() as conn:
             cursor = conn.cursor()
             # Check for existing username case-insensitively
             cursor.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?)', (username,))
@@ -322,75 +627,70 @@ def register():
                 return jsonify({'error': 'Username already taken'}), 400
 
             cursor.execute('INSERT INTO users (username, password_hash, avatar) VALUES (?, ?, ?)', (username, hashed, '🧩'))
-            conn.commit()
             user_id = cursor.lastrowid
-            session['user_id'] = user_id
-            session['username'] = username
-            session['avatar'] = '🧩'
-            return jsonify({'status': 'success'})
+        _log_in(user_id)
+        return jsonify({'status': 'success'})
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Username already taken'}), 400
 
+
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
     password = data.get('password', '')
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
+    with db() as conn:
         # Case-insensitive query for username
-        cursor.execute('SELECT id, username, password_hash, avatar FROM users WHERE LOWER(username) = LOWER(?)', (username,))
-        user = cursor.fetchone()
+        user = conn.execute(
+            'SELECT id, username, password_hash, avatar FROM users WHERE LOWER(username) = LOWER(?)',
+            (username,)
+        ).fetchone()
 
-        if user and check_password_hash(user[2], password):
-            session['user_id'] = user[0]
-            session['username'] = user[1]  # Retains stored case preference
-            session['avatar'] = user[3] or '🧩'
-            return jsonify({'status': 'success'})
-        return jsonify({'error': 'Invalid username or password'}), 401
+    if user and check_password_hash(user[2], password):
+        _log_in(user[0])
+        return jsonify({'status': 'success'})
+    return jsonify({'error': 'Invalid username or password'}), 401
+
 
 @app.route('/api/change-username', methods=['POST'])
 def change_username():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     new_username = data.get('username', '').strip()
 
     if not new_username:
         return jsonify({'error': 'Username cannot be empty'}), 400
 
     user_id = session['user_id']
-    with sqlite3.connect(DB_PATH) as conn:
+    with db() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?', (new_username, user_id))
         if cursor.fetchone():
             return jsonify({'error': 'Username is already taken'}), 400
 
         cursor.execute('UPDATE users SET username = ? WHERE id = ?', (new_username, user_id))
-        conn.commit()
-        session['username'] = new_username
-        return jsonify({'status': 'success', 'username': new_username})
+    return jsonify({'status': 'success', 'username': new_username})
+
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
     session.clear()
     return jsonify({'status': 'success'})
 
+
 @app.route('/api/me')
 def get_current_user():
     if 'user_id' not in session:
         return jsonify({'logged_in': False}), 401
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT username, avatar FROM users WHERE id = ?', (session['user_id'],))
-        row = cursor.fetchone()
-        avatar = row[1] if row and row[1] else '🧩'
-        username = row[0] if row else session['username']
-
-    return jsonify({'logged_in': True, 'username': username, 'avatar': avatar})
+    me = get_user_info(session['user_id'])
+    if not me:
+        session.clear()
+        return jsonify({'logged_in': False}), 401
+    return jsonify({'logged_in': True, **me})
 
 
 @app.route('/api/change-avatar', methods=['POST'])
@@ -398,16 +698,14 @@ def change_avatar():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     avatar = data.get('avatar', '🧩')
     user_id = session['user_id']
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET avatar = ? WHERE id = ?', (avatar, user_id))
-        conn.commit()
-        session['avatar'] = avatar
-        return jsonify({'status': 'success', 'avatar': avatar})
+    with db() as conn:
+        conn.execute('UPDATE users SET avatar = ? WHERE id = ?', (avatar, user_id))
+    return jsonify({'status': 'success', 'avatar': avatar})
+
 
 # Leaderboard Endpoint for Friends Tab
 @app.route('/api/friends/leaderboard')
@@ -433,9 +731,8 @@ def get_friends_leaderboard():
     day_key = day_base + config['suffix']
     publisher = config['publisher']
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    with db() as conn:
+        rows = conn.execute('''
             SELECT u.id, u.username, u.avatar,
                    p.timer_seconds, p.completed, p.used_check, p.ratio
             FROM users u
@@ -448,22 +745,22 @@ def get_friends_leaderboard():
                 CASE WHEN p.completed = 1 THEN 1 ELSE 2 END,
                 p.timer_seconds ASC,
                 u.username ASC
-        ''', (publisher, year, month, day_key))
+        ''', (publisher, year, month, day_key)).fetchall()
 
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                'userId': row[0],
-                'username': row[1],
-                'avatar': row[2] or '🧩',
-                'timerSeconds': row[3],
-                'completed': bool(row[4]) if row[4] is not None else False,
-                'usedCheck': bool(row[5]) if row[5] is not None else False,
-                'ratio': row[6] if row[6] is not None else 0.0,
-                'hasStarted': row[3] is not None
-            })
+    results = []
+    for row in rows:
+        results.append({
+            'userId': row[0],
+            'username': row[1],
+            'avatar': row[2] or '🧩',
+            'timerSeconds': row[3],
+            'completed': bool(row[4]) if row[4] is not None else False,
+            'usedCheck': bool(row[5]) if row[5] is not None else False,
+            'ratio': row[6] if row[6] is not None else 0.0,
+            'hasStarted': row[3] is not None
+        })
+    return jsonify(results)
 
-        return jsonify(results)
 
 # User Solve Time Statistics Endpoint
 @app.route('/api/user/stats')
@@ -472,79 +769,78 @@ def get_user_stats():
         return jsonify({'error': 'Unauthorized'}), 401
 
     user_id = session['user_id']
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+    with db() as conn:
+        rows = conn.execute('''
             SELECT publisher, year, month, day_key, timer_seconds, used_check
             FROM progress
             WHERE user_id = ? AND completed = 1
-        ''', (user_id,))
+        ''', (user_id,)).fetchall()
 
-        mini_times = []
-        midi_times = []
-        wordle_win_guesses = []   # number of guesses used, only for won games
-        wordle_guess_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
-        wordle_wins = 0
-        wordle_total = 0
-        crossword_times = {
-            'Monday': [], 'Tuesday': [], 'Wednesday': [],
-            'Thursday': [], 'Friday': [], 'Saturday': [], 'Sunday': []
+    mini_times = []
+    midi_times = []
+    wordle_win_guesses = []   # number of guesses used, only for won games
+    wordle_guess_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
+    wordle_wins = 0
+    wordle_total = 0
+    crossword_times = {
+        'Monday': [], 'Tuesday': [], 'Wednesday': [],
+        'Thursday': [], 'Friday': [], 'Saturday': [], 'Sunday': []
+    }
+
+    for row in rows:
+        publisher, year, month, day_key, secs, used_check = row
+
+        if publisher == WORDLE_PUBLISHER:
+            wordle_total += 1
+            if used_check:
+                wordle_wins += 1
+                # secs is repurposed for Wordle: number of guesses used to win
+                if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
+                    wordle_win_guesses.append(secs)
+                    wordle_guess_dist[str(secs)] += 1
+            continue
+
+        if publisher == SPELLING_BEE_PUBLISHER:
+            continue  # timer_seconds holds the score for Spelling Bee
+
+        if secs is None or secs <= 0:
+            continue
+
+        if day_key.endswith('-mini'):
+            mini_times.append(secs)
+        elif day_key.endswith('-midi'):
+            midi_times.append(secs)
+        else:
+            try:
+                day_num = int(day_key)
+                dt = datetime(int(year), int(month), day_num)
+                day_name = dt.strftime('%A')
+                if day_name in crossword_times:
+                    crossword_times[day_name].append(secs)
+            except Exception:
+                pass
+
+    def calc_avg(arr):
+        return round(sum(arr) / len(arr)) if arr else None
+
+    def calc_avg_float(arr):
+        return round(sum(arr) / len(arr), 1) if arr else None
+
+    return jsonify({
+        'miniAvg': calc_avg(mini_times),
+        'miniCount': len(mini_times),
+        'midiAvg': calc_avg(midi_times),
+        'midiCount': len(midi_times),
+        'wordleAvg': calc_avg_float(wordle_win_guesses),  # average guesses per win
+        'wordleCount': wordle_total,
+        'wordleWinRate': round((wordle_wins / wordle_total) * 100) if wordle_total else None,
+        'wordleGuessDistribution': wordle_guess_dist,      # {"1": count, ..., "6": count}, wins only
+        'crosswordByDay': {
+            day: {'avg': calc_avg(times), 'count': len(times)}
+            for day, times in crossword_times.items()
         }
+    })
 
-        for row in cursor.fetchall():
-            publisher, year, month, day_key, secs, used_check = row
-
-            if publisher == WORDLE_PUBLISHER:
-                wordle_total += 1
-                if used_check:
-                    wordle_wins += 1
-                    # secs is repurposed for Wordle: number of guesses used to win
-                    if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
-                        wordle_win_guesses.append(secs)
-                        wordle_guess_dist[str(secs)] += 1
-                continue
-
-            if secs is None or secs <= 0:
-                continue
-
-            if day_key.endswith('-mini'):
-                mini_times.append(secs)
-            elif day_key.endswith('-midi'):
-                midi_times.append(secs)
-            else:
-                try:
-                    day_num = int(day_key)
-                    dt = datetime(int(year), int(month), day_num)
-                    day_name = dt.strftime('%A')
-                    if day_name in crossword_times:
-                        crossword_times[day_name].append(secs)
-                except Exception:
-                    pass
-
-        def calc_avg(arr):
-            return round(sum(arr) / len(arr)) if arr else None
-
-        def calc_avg_float(arr):
-            return round(sum(arr) / len(arr), 1) if arr else None
-
-        stats = {
-            'miniAvg': calc_avg(mini_times),
-            'miniCount': len(mini_times),
-            'midiAvg': calc_avg(midi_times),
-            'midiCount': len(midi_times),
-            'wordleAvg': calc_avg_float(wordle_win_guesses),  # average guesses per win
-            'wordleCount': wordle_total,
-            'wordleWinRate': round((wordle_wins / wordle_total) * 100) if wordle_total else None,
-            'wordleGuessDistribution': wordle_guess_dist,      # {"1": count, ..., "6": count}, wins only
-            'crosswordByDay': {
-                day: {
-                    'avg': calc_avg(times),
-                    'count': len(times)
-                }
-                for day, times in crossword_times.items()
-            }
-        }
-        return jsonify(stats)
 
 # Session-Secured Progress APIs
 @app.route('/api/progress', methods=['GET'])
@@ -552,25 +848,13 @@ def get_user_progress_summary():
     if 'user_id' not in session:
         return jsonify({}), 401
 
-    user_id = session['user_id']
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT publisher, year, month, day_key, ratio, completed, used_check, timer_seconds
-            FROM progress WHERE user_id = ?
-        ''', (user_id,))
-        summary = {}
-        for row in cursor.fetchall():
-            key = f"{row[0]}/{row[1]}/{row[2]}/{row[3]}"
-            summary[key] = {
-                'ratio': row[4],
-                'completed': bool(row[5]),
-                'usedCheck': bool(row[6]),
-                # For crosswords this is elapsed solve time in seconds.
-                # For Wordle it's repurposed to hold the number of guesses used.
-                'timerSeconds': row[7]
-            }
-        return jsonify(summary)
+    since = None
+    days = request.args.get('days', type=int)
+    if days:
+        days = max(1, min(days, 3660))
+        since = (date.today() - timedelta(days=days)).isoformat()
+    return jsonify(get_progress_summary(session['user_id'], since))
+
 
 @app.route('/api/progress/<publisher>/<year>/<month>/<path:day_key>', methods=['GET', 'POST'])
 def handle_puzzle_progress(publisher, year, month, day_key):
@@ -578,11 +862,10 @@ def handle_puzzle_progress(publisher, year, month, day_key):
         return jsonify({'error': 'Unauthorized'}), 401
 
     user_id = session['user_id']
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        if request.method == 'POST':
-            data = request.json
-            cursor.execute('''
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        with db() as conn:
+            conn.execute('''
                 INSERT INTO progress (user_id, publisher, year, month, day_key, user_grid, timer_seconds, ratio, completed, used_check)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, publisher, year, month, day_key) DO UPDATE SET
@@ -599,102 +882,14 @@ def handle_puzzle_progress(publisher, year, month, day_key):
                 1 if data.get('completed') else 0,
                 1 if data.get('usedCheck') else 0
             ))
-            conn.commit()
-            return jsonify({'status': 'success'})
-        else:
-            cursor.execute('''
-                SELECT user_grid, timer_seconds, ratio, completed, used_check
-                FROM progress WHERE user_id = ? AND publisher = ? AND year = ? AND month = ? AND day_key = ?
-            ''', (user_id, publisher, year, month, day_key))
-            row = cursor.fetchone()
-            if row:
-                return jsonify({
-                    'userGrid': json.loads(row[0]),
-                    'timerSeconds': row[1],
-                    'ratio': row[2],
-                    'completed': bool(row[3]),
-                    'usedCheck': bool(row[4])
-                })
-            return jsonify({})
+        return jsonify({'status': 'success'})
 
-# Puzzle type -> (publisher, day_key suffix). For the NY Times puzzles, the
-# publisher is always 'NY Times' and the puzzle type is encoded as a suffix
-# on the day_key. Wordle isn't from NY Times, so it gets its own publisher
-# instead of a suffix, but otherwise reuses the exact same progress schema.
-PUZZLE_PUBLISHER = 'NY Times'
-WORDLE_PUBLISHER = 'Wordle'
-SPELLING_BEE_PUBLISHER = 'SpellingBee'
-TYPE_FOLDER_CONFIG = {
-    'normal':       {'publisher': PUZZLE_PUBLISHER, 'suffix': '',},
-    'midi':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-midi',},
-    'mini':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-mini',},
-    'wordle':       {'publisher': WORDLE_PUBLISHER, 'suffix': '',},
-    'spelling-bee': {'publisher': SPELLING_BEE_PUBLISHER, 'suffix': '',},
-}
+    return jsonify(get_saved_progress(user_id, publisher, year, month, day_key))
 
-@app.route('/archive')
-@app.route('/archive/<type_folder>')
-def archive(type_folder='midi'):
-    if 'user_id' not in session:
-        return redirect('/login')
-    if type_folder not in TYPE_FOLDER_CONFIG:
-        type_folder = 'midi'
-    return render_template('archive.html', initial_type=type_folder)
 
-@app.route('/api/archive-progress/<type_folder>/<year>/<month>')
-def get_archive_progress(type_folder, year, month):
-    if 'user_id' not in session:
-        return jsonify({'progress': {}}), 401
-    if type_folder not in TYPE_FOLDER_CONFIG:
-        return jsonify({'error': 'Invalid puzzle type'}), 400
-
-    config = TYPE_FOLDER_CONFIG[type_folder]
-    suffix = config['suffix']
-    publisher = config['publisher']
-    user_id = session['user_id']
-    month_padded = str(int(month)).zfill(2)
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT day_key, ratio, completed, used_check
-            FROM progress
-            WHERE user_id = ? AND publisher = ? AND year = ? AND month = ?
-        ''', (user_id, publisher, str(year), month_padded))
-
-        progress = {}
-        for day_key, ratio, completed, used_check in cursor.fetchall():
-            if suffix:
-                if not day_key.endswith(suffix):
-                    continue
-                day_part = day_key[:-len(suffix)]
-            else:
-                day_part = day_key
-
-            if not day_part.isdigit():
-                continue
-
-            date_key = f"{year}-{month_padded}-{day_part.zfill(2)}"
-            progress[date_key] = {
-                'ratio': ratio,
-                'completed': bool(completed),
-                'usedCheck': bool(used_check),
-            }
-
-    # Which days this month actually have a puzzle at all. Only meaningful
-    # for the NY Times types - old years didn't publish every day, and the
-    # Midi/Mini didn't exist yet, so plenty of days in-range still have no
-    # puzzle. Wordle's availability is contiguous and already handled via
-    # /api/wordle-range, so we skip the (pointless) lookup for it. Spelling
-    # Bee is one JSON file per day, so it gets its own directory scan.
-    available_days = None
-    if type_folder == 'spelling-bee':
-        available_days = get_spelling_bee_days_in_month(year, month_padded)
-    elif type_folder != 'wordle':
-        available_days = get_puzzle_days_in_month(publisher, suffix, year, month_padded)
-
-    return jsonify({'progress': progress, 'availableDays': available_days})
-
+# ---------------------------------------------------------------------------
+# Archive
+# ---------------------------------------------------------------------------
 def get_spelling_bee_days_in_month(year, month_padded):
     """Days (as ints) within a given year/month that have a Spelling Bee
     puzzle file on disk, mirroring get_puzzle_days_in_month() but scanning
@@ -710,6 +905,7 @@ def get_spelling_bee_days_in_month(year, month_padded):
         if day_part.isdigit():
             days.append(int(day_part))
     return sorted(days)
+
 
 def get_spelling_bee_available_range():
     """Earliest (year, month) with at least one Spelling Bee puzzle file on
@@ -730,6 +926,7 @@ def get_spelling_bee_available_range():
                 if min_ym is None or ym < min_ym:
                     min_ym = ym
     return min_ym
+
 
 def get_puzzle_days_in_month(publisher, suffix, year, month_padded):
     """Days (as ints) within a given year/month that have a puzzle indexed
@@ -759,18 +956,9 @@ def get_puzzle_days_in_month(publisher, suffix, year, month_padded):
 
     return sorted(days)
 
-# Available date range for the Wordle archive, so the calendar can grey out
-# days that fall before the word list started (in addition to future days).
-@app.route('/api/wordle-range')
-def wordle_range():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    start, end = get_wordle_available_range()
-    if start is None or end is None:
-        return jsonify({'startDate': None, 'endDate': None})
-    return jsonify({'startDate': start.isoformat(), 'endDate': end.isoformat()})
 
 _ARCHIVE_RANGE_CACHE = {}
+
 
 def get_puzzle_available_range(type_folder):
     """Returns ((min_year, min_month), (max_year, max_month)) spanning every
@@ -826,16 +1014,11 @@ def get_puzzle_available_range(type_folder):
     _ARCHIVE_RANGE_CACHE[type_folder] = (min_ym, max_ym)
     return min_ym, max_ym
 
-# Earliest year+month with available puzzles for a given archive tab, so the
-# month/year picker doesn't let people scroll back past when that puzzle
-# type actually started (each type started at a different point).
-@app.route('/api/archive-range/<type_folder>')
-def archive_range(type_folder):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    if type_folder not in TYPE_FOLDER_CONFIG:
-        return jsonify({'error': 'Invalid puzzle type'}), 400
 
+def get_archive_range_info(type_folder):
+    """Earliest year+month with available puzzles for a given archive tab, so
+    the month/year picker doesn't let people scroll back past when that
+    puzzle type actually started."""
     now = datetime.now()
 
     if type_folder == 'wordle':
@@ -844,29 +1027,156 @@ def archive_range(type_folder):
         start_month = start.month if start else None
     elif type_folder == 'spelling-bee':
         min_ym = get_spelling_bee_available_range()
-        if min_ym:
-            start_year, start_month = min_ym
-        else:
-            start_year, start_month = None, None
+        start_year, start_month = min_ym if min_ym else (None, None)
     else:
         min_ym, _ = get_puzzle_available_range(type_folder)
-        if min_ym:
-            start_year, start_month = min_ym
-        else:
-            start_year, start_month = None, None
+        start_year, start_month = min_ym if min_ym else (None, None)
 
     if start_year is None:
         start_year, start_month = now.year, now.month
 
-    return jsonify({
+    return {
         'startYear': start_year,
         'startMonth': start_month,  # 1-indexed
         'endYear': now.year,
-    })
+    }
 
+
+def build_archive_bundle(user_id, type_folder, year, month):
+    """Everything the archive calendar needs for one type + month, in one go:
+    the user's progress, which days have puzzles, the type's start month and
+    (for Wordle) the available date range. Used both to pre-render the page
+    and by the JSON endpoint below, so the calendar needs no follow-up
+    requests on load."""
+    config = TYPE_FOLDER_CONFIG[type_folder]
+    suffix = config['suffix']
+    publisher = config['publisher']
+    year = int(year)
+    month_padded = f"{int(month):02d}"
+
+    progress = {}
+    with db() as conn:
+        rows = conn.execute('''
+            SELECT day_key, ratio, completed, used_check
+            FROM progress
+            WHERE user_id = ? AND publisher = ? AND year = ? AND month = ?
+        ''', (user_id, publisher, str(year), month_padded)).fetchall()
+
+    for day_key, ratio, completed, used_check in rows:
+        if suffix:
+            if not day_key.endswith(suffix):
+                continue
+            day_part = day_key[:-len(suffix)]
+        else:
+            day_part = day_key
+
+        if not day_part.isdigit():
+            continue
+
+        date_key = f"{year}-{month_padded}-{day_part.zfill(2)}"
+        progress[date_key] = {
+            'ratio': ratio,
+            'completed': bool(completed),
+            'usedCheck': bool(used_check),
+        }
+
+    # Which days this month actually have a puzzle at all. Only meaningful
+    # for the NY Times types (old years didn't publish every day) and Spelling
+    # Bee. Wordle's availability is a contiguous range (wordleRange below).
+    available_days = None
+    if type_folder == 'spelling-bee':
+        available_days = get_spelling_bee_days_in_month(year, month_padded)
+    elif type_folder != 'wordle':
+        available_days = get_puzzle_days_in_month(publisher, suffix, year, month_padded)
+
+    wordle_range = None
+    if type_folder == 'wordle':
+        start, end = get_wordle_available_range()
+        wordle_range = {
+            'startDate': start.isoformat() if start else None,
+            'endDate': end.isoformat() if end else None,
+        }
+
+    return {
+        'type': type_folder,
+        'year': year,
+        'month': int(month),
+        'progress': progress,
+        'availableDays': available_days,
+        'range': get_archive_range_info(type_folder),
+        'wordleRange': wordle_range,
+    }
+
+
+@app.route('/archive')
+@app.route('/archive/<type_folder>')
+def archive(type_folder='midi'):
+    if 'user_id' not in session:
+        return redirect('/login')
+    if type_folder not in TYPE_FOLDER_CONFIG:
+        type_folder = 'midi'
+
+    # Pre-render the first month the page will show (from ?y=&m=, where m is
+    # 0-indexed like JS's Date, or the current month) so it needs no API calls.
+    now = datetime.now()
+    try:
+        y = int(request.args.get('y', ''))
+        m0 = int(request.args.get('m', ''))
+        if not (1900 <= y <= now.year + 1 and 0 <= m0 <= 11):
+            raise ValueError
+    except ValueError:
+        y, m0 = now.year, now.month - 1
+
+    boot = build_archive_bundle(session['user_id'], type_folder, y, m0 + 1)
+    return render_template('archive.html', initial_type=type_folder, boot=boot)
+
+
+@app.route('/api/archive-progress/<type_folder>/<year>/<month>')
+def get_archive_progress(type_folder, year, month):
+    if 'user_id' not in session:
+        return jsonify({'progress': {}}), 401
+    if type_folder not in TYPE_FOLDER_CONFIG:
+        return jsonify({'error': 'Invalid puzzle type'}), 400
+    try:
+        bundle = build_archive_bundle(session['user_id'], type_folder, year, month)
+    except ValueError:
+        return jsonify({'error': 'Invalid date'}), 400
+    return jsonify(bundle)
+
+
+# Available date range for the Wordle archive, so the calendar can grey out
+# days that fall before the word list started (in addition to future days).
+@app.route('/api/wordle-range')
+def wordle_range():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    start, end = get_wordle_available_range()
+    if start is None or end is None:
+        return jsonify({'startDate': None, 'endDate': None})
+    return jsonify({'startDate': start.isoformat(), 'endDate': end.isoformat()})
+
+
+@app.route('/api/archive-range/<type_folder>')
+def archive_range(type_folder):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if type_folder not in TYPE_FOLDER_CONFIG:
+        return jsonify({'error': 'Invalid puzzle type'}), 400
+    return jsonify(get_archive_range_info(type_folder))
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
 @app.route('/')
 def index():
-    if 'user_id' not in session:
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect('/login')
+
+    me = get_user_info(user_id)
+    if not me:                       # account was deleted
+        session.clear()
         return redirect('/login')
 
     today = datetime.now()
@@ -883,9 +1193,6 @@ def index():
     # scraper has written that day's file. Checking the data directly stays
     # correct regardless of either timezone.
     today_available = {}
-    master = get_master_index()
-    meta = get_data(0, 22, 78)
-    header = get_data(*meta[5:8], mode='raw')
 
     for p_type, cfg in TYPE_FOLDER_CONFIG.items():
         if p_type == 'wordle':
@@ -902,12 +1209,13 @@ def index():
         found = False
         title_text = "Crack the clues in today's puzzle."
         try:
-            info = master[publisher][year][month][day_key]
-            puz_data = get_data(*info, mode='gzip', header=header)
-            title_text = f"“{get_puzzle_title(puz_data)}”"
+            title_text = f"“{_master_title(publisher, year, month, day_key)}”"
             found = True
         except Exception:
-            fallback = load_fallback_puzzle_json(publisher, year, month, day_key)
+            try:
+                fallback = load_fallback_puzzle_json(publisher, year, month, day_key)
+            except Exception:
+                fallback = None
             if fallback is not None:
                 title_text = f"“{fallback.get('title') or 'Crack the clues in todays puzzle.'}”"
                 found = True
@@ -915,15 +1223,48 @@ def index():
         today_available[p_type] = found
         today_titles[p_type] = "Solve the puzzle in seconds." if p_type == 'mini' else title_text
 
-    return render_template('index.html', today_titles=today_titles, today_available=today_available)
+    # The page needs the user's name/avatar and the last week or so of
+    # progress to draw itself; embed them instead of making the browser fetch
+    # /api/me and /api/progress after load.
+    since = (today_date - timedelta(days=10)).isoformat()
+    boot = {'me': me, 'progress': get_progress_summary(user_id, since)}
 
+    return render_template('index.html', today_titles=today_titles,
+                           today_available=today_available, boot=boot)
+
+
+# ---------------------------------------------------------------------------
+# Crossword play page
+# ---------------------------------------------------------------------------
 @app.route('/play/<publisher>/<year>/<month>/<path:day_key>')
 def play_puzzle(publisher, year, month, day_key):
-    if 'user_id' not in session:
+    user_id = session.get('user_id')
+    if not user_id:
         return redirect('/login')
-    return render_template('play.html', publisher=publisher, year=year, month=month, day_key=day_key)
 
+    # The puzzle and the user's saved progress are embedded in the page so it
+    # can start immediately (previously: 2 sequential API calls after load).
+    status = 200
+    try:
+        puzzle, _ = load_puzzle(publisher, year, month, day_key)
+        error = None if puzzle is not None else f"No puzzle found for {publisher}/{year}/{month}/{day_key}"
+    except Exception as e:
+        puzzle, error = None, str(e)
+
+    if puzzle is None:
+        boot = {'error': error}
+        status = 404
+    else:
+        boot = {'puzzle': puzzle,
+                'saved': get_saved_progress(user_id, publisher, year, month, day_key)}
+
+    return render_template('play.html', publisher=publisher, year=year, month=month,
+                           day_key=day_key, boot=boot), status
+
+
+# ---------------------------------------------------------------------------
 # Wordle Routes
+# ---------------------------------------------------------------------------
 @app.route('/wordle')
 def wordle_today():
     if 'user_id' not in session:
@@ -931,32 +1272,45 @@ def wordle_today():
     today = date.today()
     return redirect(f"/wordle/{today.year}/{today.month:02d}/{today.day:02d}")
 
+
 @app.route('/wordle/<year>/<month>/<day>')
 def play_wordle(year, month, day):
-    if 'user_id' not in session:
+    user_id = session.get('user_id')
+    if not user_id:
         return redirect('/login')
     try:
         target_date = date(int(year), int(month), int(day))
     except ValueError:
         return "Invalid date", 400
 
+    month_p, day_p = f"{int(month):02d}", f"{int(day):02d}"
     word = get_wordle_word_for_date(target_date)
     if word is None:
         return render_template('wordle.html', target_word='', word_unavailable=True,
-                                year=year, month=f"{int(month):02d}", day=f"{int(day):02d}")
+                               year=year, month=month_p, day=day_p)
 
+    saved = get_saved_progress(user_id, WORDLE_PUBLISHER, year, month_p, day_p)
     return render_template('wordle.html', target_word=word, word_unavailable=False,
-                            year=year, month=f"{int(month):02d}", day=f"{int(day):02d}",
-                            max_guesses=WORDLE_MAX_GUESSES)
+                           year=year, month=month_p, day=day_p,
+                           max_guesses=WORDLE_MAX_GUESSES, saved=saved)
+
 
 @app.route('/api/wordle-valid-words')
 def wordle_valid_words():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    return Response(get_valid_wordle_words_text(), mimetype='text/plain')
+    text = get_valid_wordle_words_text()
+    resp = Response(text, mimetype='text/plain')
+    # The dictionary basically never changes: let the browser keep it for a
+    # week, and answer revalidations with a 304 after that.
+    resp.set_etag(_VALID_WORDLE_WORDS_ETAG)
+    resp.headers['Cache-Control'] = 'private, max-age=604800'
+    return resp.make_conditional(request)
 
+
+# ---------------------------------------------------------------------------
 # Spelling Bee Routes
-
+# ---------------------------------------------------------------------------
 def get_spelling_bee_puzzle(target_date: date):
     """Loads puzzles/spelling-bee/<year>/<month>/<day>.json for a given date,
     or None if that day doesn't have a puzzle on disk."""
@@ -969,6 +1323,7 @@ def get_spelling_bee_puzzle(target_date: date):
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+
 @app.route('/spelling-bee')
 def spelling_bee_today():
     if 'user_id' not in session:
@@ -976,51 +1331,53 @@ def spelling_bee_today():
     today = date.today()
     return redirect(f"/spelling-bee/{today.year}/{today.month:02d}/{today.day:02d}")
 
+
 @app.route('/spelling-bee/<year>/<month>/<day>')
 def play_spelling_bee(year, month, day):
-    if 'user_id' not in session:
+    user_id = session.get('user_id')
+    if not user_id:
         return redirect('/login')
     try:
         target_date = date(int(year), int(month), int(day))
     except ValueError:
         return "Invalid date", 400
 
+    month_p, day_p = f"{int(month):02d}", f"{int(day):02d}"
     puzzle = get_spelling_bee_puzzle(target_date)
     if puzzle is None:
         return render_template('spelling-bee.html', puzzle_unavailable=True,
-                                year=year, month=f"{int(month):02d}", day=f"{int(day):02d}")
+                               year=year, month=month_p, day=day_p)
 
+    saved = get_saved_progress(user_id, SPELLING_BEE_PUBLISHER, year, month_p, day_p)
     return render_template('spelling-bee.html', puzzle_unavailable=False, puzzle=puzzle,
-                            year=year, month=f"{int(month):02d}", day=f"{int(day):02d}")
+                           year=year, month=month_p, day=day_p, saved=saved)
 
+
+# ---------------------------------------------------------------------------
+# Raw puzzle APIs (no longer used by the bundled pages, kept for other clients)
+# ---------------------------------------------------------------------------
 @app.route('/api/puzzles-list')
 def puzzles_list():
-    return jsonify(get_master_index())
+    resp = jsonify(get_master_index())
+    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    return resp
+
 
 @app.route('/api/puzzle-json/<publisher>/<year>/<month>/<path:day_key>')
 def get_puzzle_json(publisher, year, month, day_key):
-    # First choice: the master archive (puzzles/xwords).
     try:
-        master = get_master_index()
-        info = master[publisher][year][month][day_key]
-        meta = get_data(0, 22, 78)
-        header = get_data(*meta[5:8], mode='raw')
-        puz_data = get_data(*info, mode='gzip', header=header)
-
-        name = f"{publisher} - {year}-{month}-{day_key}"
-        return jsonify(build_puzzle_json(name, puz_data))
-    except Exception:
-        pass  # Not in the master archive - fall through to the scraper's folder.
-
-    # Second choice: an individually-scraped puzzle (puzzles/crosswords).
-    try:
-        fallback = load_fallback_puzzle_json(publisher, year, month, day_key)
-        if fallback is not None:
-            return jsonify(fallback)
+        puzzle, immutable = load_puzzle(publisher, year, month, day_key)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    return jsonify({"error": f"No puzzle found for {publisher}/{year}/{month}/{day_key}"}), 404
+    if puzzle is None:
+        return jsonify({"error": f"No puzzle found for {publisher}/{year}/{month}/{day_key}"}), 404
+
+    resp = jsonify(puzzle)
+    if immutable:
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5235)

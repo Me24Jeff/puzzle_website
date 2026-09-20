@@ -7,6 +7,7 @@ services:
     working_dir: /app/data
     environment:
       TZ: Asia/Jerusalem
+      COOKIE_SECURE: 1
       FLASK_SECRET_KEY: a65cb14fb41dd3022ee2827ad9d71e164a29d222a679ad99cc77677c8444ed45
       PYTHONPATH: /app
     volumes:

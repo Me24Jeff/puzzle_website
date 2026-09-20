@@ -9,13 +9,7 @@
     <!-- Android / Chrome Web App Manifest -->
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-            });
-        }
-    </script>
+    {% include '_sw.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
 
@@ -32,6 +26,9 @@
         }
         const todayTitles = {{ today_titles | tojson }};
         const todayAvailable = {{ today_available | tojson }};
+        // Name/avatar + the last ~10 days of progress, rendered server-side so the
+        // dashboard doesn't need /api/me + /api/progress round trips on load.
+        const BOOT = {{ boot | tojson }};
     </script>
     <style>
         body {
@@ -379,13 +376,7 @@
             loadLeaderboard();
         }
 
-        async function init() {
-            const res = await fetch('/api/me');
-            if (!res.ok) {
-                window.location.href = '/login';
-                return;
-            }
-            const data = await res.json();
+        function applyMe(data) {
             currentUsername = data.username;
             currentAvatar = data.avatar || '🧩';
 
@@ -393,8 +384,40 @@
 
             document.getElementById('account-username-display').textContent = `@${data.username}`;
             document.getElementById('account-avatar-display').textContent = currentAvatar;
+        }
 
+        async function init() {
+            // Normal path: everything needed is already embedded in the page.
+            if (typeof BOOT !== 'undefined' && BOOT && BOOT.me) {
+                applyMe(BOOT.me);
+                userProgressMap = BOOT.progress || {};
+                renderRows();
+                return;
+            }
+
+            // Fallback (shouldn't normally happen): fetch it.
+            const res = await fetch('/api/me');
+            if (!res.ok) {
+                window.location.href = '/login';
+                return;
+            }
+            applyMe(await res.json());
             await loadUserProgress();
+        }
+
+        // Tiny in-memory cache for read-only JSON (leaderboard / stats) so
+        // flipping between tabs doesn't re-request the same thing. Returns
+        // null on HTTP errors. Cleared whenever the page is restored from bfcache.
+        const _jsonCache = new Map();
+        async function fetchJsonCached(url, ttlMs) {
+            const hit = _jsonCache.get(url);
+            if (hit && Date.now() - hit.t < ttlMs) return hit.data;
+            const res = await fetch(url);
+            if (res.status === 401) { window.location.href = '/login'; return null; }
+            if (!res.ok) return null;
+            const data = await res.json();
+            _jsonCache.set(url, { t: Date.now(), data });
+            return data;
         }
 
         async function selectAvatar(avatarEmoji) {
@@ -405,6 +428,7 @@
             });
 
             if (res.ok) {
+                _jsonCache.clear();
                 currentAvatar = avatarEmoji;
                 document.getElementById('account-avatar-display').textContent = avatarEmoji;
             }
@@ -423,13 +447,12 @@
             const container = document.getElementById('leaderboard-list');
             container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">Loading leaderboard...</div>';
 
-            const res = await fetch(`/api/friends/leaderboard?type=${currentFriendsSubTab}&date=${dateVal}`);
-            if (!res.ok) {
+            let users = await fetchJsonCached(`/api/friends/leaderboard?type=${currentFriendsSubTab}&date=${dateVal}`, 20000);
+            if (users === null) {
                 container.innerHTML = '<div class="text-center text-red-500 dark:text-red-400 py-4 text-sm">Failed to load leaderboard</div>';
                 return;
             }
 
-            let users = await res.json();
             if (!users || users.length === 0) {
                 container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">No activity recorded for this day yet.</div>';
                 return;
@@ -519,10 +542,8 @@
         }
 
         async function loadUserStats() {
-            const res = await fetch('/api/user/stats');
-            if (!res.ok) return;
-
-            const stats = await res.json();
+            const stats = await fetchJsonCached('/api/user/stats', 60000);
+            if (!stats) return;
 
             document.getElementById('stat-mini-avg').textContent = formatTime(stats.miniAvg);
             document.getElementById('stat-mini-count').textContent = `${stats.miniCount} solved`;
@@ -605,6 +626,7 @@
 
             msg.classList.remove('hidden', 'text-red-600', 'dark:text-red-400', 'text-green-600', 'dark:text-green-400');
             if (res.ok) {
+                _jsonCache.clear();
                 currentUsername = data.username;
                 document.getElementById('account-username-display').textContent = `@${data.username}`;
                 input.value = '';
@@ -617,7 +639,7 @@
         }
 
         async function loadUserProgress() {
-            const res = await fetch('/api/progress');
+            const res = await fetch('/api/progress?days=10');
             if (res.ok) {
                 userProgressMap = await res.json();
                 renderRows();
@@ -817,6 +839,15 @@
         }
 
         init();
+
+        // Coming back via the browser's back/forward cache shows the old DOM
+        // (before you solved something); refresh the progress icons then.
+        window.addEventListener('pageshow', (e) => {
+            if (e.persisted) {
+                _jsonCache.clear();
+                loadUserProgress();
+            }
+        });
     </script>
 </body>
 </html>
