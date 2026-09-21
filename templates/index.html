@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <!-- iOS / Apple Home Screen Icon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icon/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Crossword">
 
@@ -10,8 +10,8 @@
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
     {% include '_sw.html' %}
-    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon/192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon/512.png">
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -192,10 +192,11 @@
 
         <!-- Puzzle Type Sub-Tabs -->
         <div class="flex bg-slate-200/80 dark:bg-neutral-800 p-1 rounded-xl mb-4 text-xs font-bold">
-            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition">The Crossword</button>
-            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">The Midi</button>
-            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">The Mini</button>
+            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition">Crossword</button>
+            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Midi</button>
+            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Mini</button>
             <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Wordle</button>
+            <button onclick="switchFriendsSubTab('spelling-bee')" id="subtab-spelling-bee" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Bee</button>
         </div>
 
         <!-- Leaderboard Users List -->
@@ -205,6 +206,10 @@
     <!-- View 3: User / Account Tab -->
     <div id="tab-account" class="tab-content hidden p-4 max-w-xl mx-auto space-y-6">
         <h1 class="text-2xl font-black text-slate-900 dark:text-white">Profile & Stats</h1>
+
+        <div id="password-notice" class="hidden p-3 rounded-xl text-sm font-semibold bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900">
+            You're using a temporary password set by an admin. Please choose your own below.
+        </div>
 
         <!-- Profile Header & Avatar Selector -->
         <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700">
@@ -256,6 +261,25 @@
                 </div>
             </div>
 
+            <!-- Spelling Bee -->
+            <div class="grid grid-cols-3 gap-3">
+                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Bee Avg</div>
+                    <div id="stat-bee-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
+                    <div id="stat-bee-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 played</div>
+                </div>
+                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Genius+</div>
+                    <div id="stat-bee-genius" class="text-xl font-black text-slate-800 dark:text-white">0</div>
+                    <div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">days</div>
+                </div>
+                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
+                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Queen Bee</div>
+                    <div id="stat-bee-queen" class="text-xl font-black text-slate-800 dark:text-white">0</div>
+                    <div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">days</div>
+                </div>
+            </div>
+
             <!-- Detailed Crossword Averages by Day of the Week -->
             <div>
                 <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">The Crossword (By Day of Week)</h3>
@@ -273,6 +297,14 @@
             </div>
         </div>
 
+        <!-- Admin: account recovery (only shown to admins) -->
+        <div id="admin-card" class="hidden bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700 space-y-3">
+            <h2 class="font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide text-xs">Admin: Reset a Password</h2>
+            <p class="text-xs text-slate-500 dark:text-neutral-400">Generates a temporary password for someone who forgot theirs. Give it to them privately; they'll be asked to change it after logging in.</p>
+            <div id="admin-reset-result" class="hidden p-3 rounded-lg text-sm bg-green-50 dark:bg-green-950/30 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-900"></div>
+            <div id="admin-user-list" class="space-y-2"></div>
+        </div>
+
         <!-- Account Controls -->
         <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700 space-y-4">
             <div class="space-y-2">
@@ -282,6 +314,17 @@
                     <button onclick="changeUsername()" class="bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">Save</button>
                 </div>
                 <p id="username-msg" class="text-xs hidden"></p>
+            </div>
+
+            <hr class="border-slate-100 dark:border-neutral-700">
+
+            <div class="space-y-2">
+                <label class="block text-xs font-bold text-slate-500 dark:text-neutral-400">Change Password</label>
+                <input type="password" id="current-password-input" autocomplete="current-password" placeholder="Current password" class="w-full px-3 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="new-password-input" autocomplete="new-password" placeholder="New password" class="w-full px-3 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="confirm-password-input" autocomplete="new-password" placeholder="Confirm new password" class="w-full px-3 py-2 border border-slate-300 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button onclick="changePassword()" class="w-full bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">Update Password</button>
+                <p id="password-msg" class="text-xs hidden"></p>
             </div>
 
             <hr class="border-slate-100 dark:border-neutral-700">
@@ -319,6 +362,12 @@
         let currentUsername = '';
         let currentAvatar = '🧩';
         let currentFriendsSubTab = 'normal';
+        let currentIsAdmin = false;
+        let adminUsers = [];
+
+        function escapeHtml(str) {
+            return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
 
         function updateGreeting(username) {
             const currentHour = new Date().getHours();
@@ -360,12 +409,15 @@
             });
 
             if (tabName === 'friends') loadLeaderboard();
-            if (tabName === 'account') loadUserStats();
+            if (tabName === 'account') {
+                loadUserStats();
+                loadAdminUsers();
+            }
         }
 
         function switchFriendsSubTab(type) {
             currentFriendsSubTab = type;
-            ['normal', 'midi', 'mini', 'wordle'].forEach(t => {
+            ['normal', 'midi', 'mini', 'wordle', 'spelling-bee'].forEach(t => {
                 const btn = document.getElementById(`subtab-${t}`);
                 if (t === type) {
                     btn.className = 'flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition';
@@ -384,6 +436,12 @@
 
             document.getElementById('account-username-display').textContent = `@${data.username}`;
             document.getElementById('account-avatar-display').textContent = currentAvatar;
+
+            currentIsAdmin = !!data.isAdmin;
+            document.getElementById('admin-card').classList.toggle('hidden', !currentIsAdmin);
+            document.getElementById('password-notice').classList.toggle('hidden', !data.mustChange);
+            // Signed in with an admin-issued temporary password: send them to the password form.
+            if (data.mustChange) switchTab('account');
         }
 
         async function init() {
@@ -476,12 +534,43 @@
                 });
             }
 
+            if (currentFriendsSubTab === 'spelling-bee') {
+                // timerSeconds holds the score for Spelling Bee: highest first.
+                users = [...users].sort((a, b) => {
+                    if (a.hasStarted !== b.hasStarted) return a.hasStarted ? -1 : 1;
+                    if (a.hasStarted && (b.timerSeconds || 0) !== (a.timerSeconds || 0)) {
+                        return (b.timerSeconds || 0) - (a.timerSeconds || 0);
+                    }
+                    return a.username.localeCompare(b.username);
+                });
+            }
+
             let html = '';
             let rank = 1;
 
             users.forEach(u => {
                 let statusBadge = '';
-                if (u.completed && currentFriendsSubTab === 'wordle') {
+                if (currentFriendsSubTab === 'spelling-bee') {
+                    if (u.hasStarted) {
+                        const rankName = beeRankName(u.ratio || 0);
+                        const top = rankName === 'Genius' || rankName === 'Queen Bee';
+                        const badgeBg = top
+                            ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900'
+                            : 'bg-slate-100 dark:bg-neutral-700 text-slate-600 dark:text-neutral-300';
+                        statusBadge = `
+                            <div class="text-right">
+                                <div class="font-black text-slate-800 dark:text-white text-base">${u.timerSeconds ?? 0} pts</div>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeBg}">${rankName}</span>
+                            </div>
+                        `;
+                    } else {
+                        statusBadge = `
+                            <div class="text-right">
+                                <span class="text-xs font-medium text-slate-400 dark:text-neutral-500">Not started</span>
+                            </div>
+                        `;
+                    }
+                } else if (u.completed && currentFriendsSubTab === 'wordle') {
                     // usedCheck is repurposed for Wordle: true = won, false = lost.
                     // timerSeconds is repurposed to hold the number of guesses used.
                     const won = u.usedCheck;
@@ -519,7 +608,8 @@
                     `;
                 }
 
-                const isRanked = currentFriendsSubTab === 'wordle' ? (u.completed && u.usedCheck) : u.completed;
+                const isRanked = currentFriendsSubTab === 'spelling-bee' ? u.hasStarted
+                    : currentFriendsSubTab === 'wordle' ? (u.completed && u.usedCheck) : u.completed;
                 const rankDisplay = isRanked ? `<span class="w-5 text-xs font-black text-slate-400 dark:text-neutral-500">#${rank++}</span>` : `<span class="w-5"></span>`;
 
                 html += `
@@ -527,10 +617,10 @@
                         <div class="flex items-center gap-3">
                             ${rankDisplay}
                             <div class="w-10 h-10 rounded-full bg-slate-100 dark:bg-neutral-700 flex items-center justify-center text-xl shadow-inner border border-slate-200 dark:border-neutral-600">
-                                ${u.avatar || '🧩'}
+                                ${escapeHtml(u.avatar || '🧩')}
                             </div>
                             <div>
-                                <div class="font-bold text-slate-800 dark:text-slate-100 text-sm">${u.username} ${u.username === currentUsername ? '<span class="text-[10px] bg-slate-100 dark:bg-neutral-700 px-1.5 py-0.5 rounded text-slate-500 dark:text-neutral-300 font-bold ml-1">You</span>' : ''}</div>
+                                <div class="font-bold text-slate-800 dark:text-slate-100 text-sm">${escapeHtml(u.username)} ${u.username === currentUsername ? '<span class="text-[10px] bg-slate-100 dark:bg-neutral-700 px-1.5 py-0.5 rounded text-slate-500 dark:text-neutral-300 font-bold ml-1">You</span>' : ''}</div>
                             </div>
                         </div>
                         ${statusBadge}
@@ -554,6 +644,11 @@
             document.getElementById('stat-wordle-avg').textContent = (stats.wordleAvg !== null && stats.wordleAvg !== undefined) ? `${stats.wordleAvg}` : '--';
             const winRateStr = (stats.wordleWinRate !== null && stats.wordleWinRate !== undefined) ? ` &middot; ${stats.wordleWinRate}% won` : '';
             document.getElementById('stat-wordle-count').innerHTML = `${stats.wordleCount} played${winRateStr}`;
+
+            document.getElementById('stat-bee-avg').textContent = (stats.beeAvgScore !== null && stats.beeAvgScore !== undefined) ? stats.beeAvgScore : '--';
+            document.getElementById('stat-bee-count').textContent = `${stats.beeCount || 0} played`;
+            document.getElementById('stat-bee-genius').textContent = stats.beeGeniusCount || 0;
+            document.getElementById('stat-bee-queen').textContent = stats.beeQueenCount || 0;
 
             const daysGrid = document.getElementById('crossword-days-grid');
             const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -638,6 +733,81 @@
             }
         }
 
+        function showMsg(el, text, ok) {
+            el.classList.remove('hidden', 'text-red-600', 'dark:text-red-400', 'text-green-600', 'dark:text-green-400');
+            el.textContent = text;
+            el.classList.add(...(ok ? ['text-green-600', 'dark:text-green-400'] : ['text-red-600', 'dark:text-red-400']));
+        }
+
+        async function changePassword() {
+            const cur = document.getElementById('current-password-input');
+            const nw = document.getElementById('new-password-input');
+            const conf = document.getElementById('confirm-password-input');
+            const msg = document.getElementById('password-msg');
+
+            if (!cur.value || !nw.value) { showMsg(msg, 'Fill in your current and new password', false); return; }
+            if (nw.value !== conf.value) { showMsg(msg, "New passwords don't match", false); return; }
+
+            const res = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ currentPassword: cur.value, newPassword: nw.value })
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+                cur.value = nw.value = conf.value = '';
+                document.getElementById('password-notice').classList.add('hidden');
+                showMsg(msg, 'Password updated successfully!', true);
+            } else {
+                showMsg(msg, data.error || 'Failed to update password', false);
+            }
+        }
+
+        async function loadAdminUsers() {
+            if (!currentIsAdmin) return;
+            const list = document.getElementById('admin-user-list');
+            const res = await fetch('/api/admin/users');
+            if (!res.ok) { list.textContent = 'Failed to load users'; return; }
+            adminUsers = (await res.json()).filter(u => u.username !== currentUsername);
+
+            if (adminUsers.length === 0) {
+                list.innerHTML = '<p class="text-xs text-slate-400 dark:text-neutral-500">No other users yet.</p>';
+                return;
+            }
+            list.innerHTML = adminUsers.map(u => `
+                <div class="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-neutral-900 rounded-xl border border-slate-100 dark:border-neutral-700">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-lg">${escapeHtml(u.avatar)}</span>
+                        <span class="font-semibold text-sm text-slate-700 dark:text-neutral-200 truncate">${escapeHtml(u.username)}</span>
+                    </div>
+                    <button onclick="adminResetPassword(${Number(u.userId)})" class="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 transition">Reset</button>
+                </div>
+            `).join('');
+        }
+
+        async function adminResetPassword(userId) {
+            const u = adminUsers.find(x => x.userId === userId);
+            if (!u) return;
+            if (!confirm(`Reset the password for ${u.username}? Their current password will stop working.`)) return;
+
+            const box = document.getElementById('admin-reset-result');
+            const res = await fetch('/api/admin/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+            });
+            const data = await res.json().catch(() => ({}));
+            box.classList.remove('hidden');
+            if (res.ok) {
+                box.innerHTML = `Temporary password for <b>${escapeHtml(data.username)}</b>:
+                    <code class="select-all font-mono font-bold text-base px-1.5 py-0.5 rounded bg-white/70 dark:bg-black/30">${escapeHtml(data.tempPassword)}</code>
+                    <div class="text-xs mt-1 opacity-80">Shown only once. Share it privately; they'll be asked to change it after logging in.</div>`;
+            } else {
+                box.textContent = data.error || 'Reset failed';
+            }
+        }
+
         async function loadUserProgress() {
             const res = await fetch('/api/progress?days=10');
             if (res.ok) {
@@ -649,6 +819,14 @@
         // Spelling Bee's progress icons are keyed by rank tier rather than a
         // plain 0-9 fill bucket.
         const BEE_RANK_PCTS = [0, 0.02, 0.05, 0.08, 0.15, 0.25, 0.40, 0.50, 0.70, 1.00];
+        const BEE_RANK_NAMES = ['Beginner', 'Good Start', 'Moving Up', 'Good', 'Solid', 'Nice', 'Great', 'Amazing', 'Genius', 'Queen Bee'];
+        function beeRankName(ratio) {
+            let idx = 0;
+            for (let i = 0; i < BEE_RANK_PCTS.length; i++) {
+                if (ratio >= BEE_RANK_PCTS[i] - 1e-9) idx = i;
+            }
+            return BEE_RANK_NAMES[idx];
+        }
         function beeRankIndexFromRatio(ratio) {
             let idx = 0;
             for (let i = 0; i < BEE_RANK_PCTS.length; i++) {

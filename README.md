@@ -1,12 +1,3 @@
-# crossword-app Docker stack
-
-Two folders here, matching your convention:
-
-```
-stacks/crossword/        -> goes to /opt/stacks/crossword       (code + compose)
-appdata/crossword/      -> goes to /opt/appdata/crossword     (persistent data)
-```
-
 ## 1. File structure
 
 ### `/opt/stacks/crossword/` (the code)
@@ -47,13 +38,23 @@ crossword/
 ├── puzzle_progress.db          # sqlite DB - created automatically on first run
 ├── logs/
 │   └── cron.log                 # output of every scrape, tail this to debug
-└── puzzles/
-    ├── xwords/                  # master archive - pulled weekly from your GitHub repo
-    ├── crosswords/              # NY Times/<year>/<month>/<day[-mini|-midi]>.json
-    │                             #   one file per scraped daily/mini/midi puzzle
-    ├── spelling-bee/            # <year>/<month>/<day>.json, one per day
-    ├── wordle_words.txt         # fixed-width file, appended to daily
-    └── valid_wordle_words.txt   # you already maintain this; not touched by any scraper
+├── puzzles/
+│   ├── xwords/                  # master archive - pulled weekly from your GitHub repo
+│   ├── crosswords/              # NY Times/<year>/<month>/<day[-mini|-midi]>.json
+│   │                             #   one file per scraped daily/mini/midi puzzle
+│   ├── spelling-bee/            # <year>/<month>/<day>.json, one per day
+│   ├── wordle_words.txt         # fixed-width file, appended to daily
+│   └── valid_wordle_words.txt   # you already maintain this; not touched by any scraper
+└── static/
+    ├── site.webmanifest
+    ├── icon/                    # contains 512.png, 192.png, and apple-touch-icon.png
+    ├── normal/                  # progress-{0-9}.svg, complete-gold.svg, complete.svg, unavailable.svg
+    ├── midi/                    # progress-{0-9}.svg, complete-gold.svg, complete.svg, unavailable.svg
+    ├── mini/                    # progress-{0-4}.svg, complete-gold.svg, complete.svg, unavailable.svg
+    ├── wordle/                  # progress-{0-5}.svg, complete-won.svg, complete-lost.svg, unavailable.svg
+    ├── speling-bee/             # progress-{0-8}.svg, unavailable.svg
+    ├── connections.svg
+    └── victory.mp3
 ```
 
 Because both containers set `working_dir: /app/data` and mount this folder
@@ -112,3 +113,20 @@ docker compose exec scraper python3 /app/scrapers/spelling_bee_scraper.py
 # rebuild after editing app.py, templates, or scripts
 docker compose up -d --build
 ```
+
+## 6. Admin / account recovery
+
+There's no email on file, so a forgotten password is recovered by an admin.
+Admins are set with the `ADMIN_USERNAMES` environment variable (comma-separated)
+on the **web** service in `docker-compose.yml`:
+
+```yaml
+    environment:
+      ADMIN_USERNAMES: yourusername
+```
+
+The list is applied at startup, so register your account first, add the
+variable, then `docker compose up -d`. Admins get a "Reset a Password" card on
+the User tab: it generates a one-time temporary password for the chosen user,
+which the admin passes on privately. That user is prompted to set their own
+password after logging in (User tab -> Change Password).

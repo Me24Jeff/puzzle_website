@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 from functools import lru_cache
-import os, gzip, json, sqlite3, time, hashlib
+import os, gzip, json, sqlite3, time, hashlib, secrets
 
 app = Flask(__name__, static_folder="/app/data/static", static_url_path="/static")
 
@@ -84,6 +84,15 @@ app.config.update(
 
 PUZZLE_DIR = "puzzles/xwords"
 DB_PATH = "puzzle_progress.db"
+
+# Admins are configured with a comma-separated list of usernames, e.g.
+#   ADMIN_USERNAMES=alice,bob
+# The list is applied at startup (see init_db): those users get is_admin=1 and
+# everybody else gets 0. With the variable unset there are no admins at all.
+ADMIN_USERNAMES = {u.strip().lower() for u in os.environ.get('ADMIN_USERNAMES', '').split(',') if u.strip()}
+
+# Spelling Bee "Genius" rank starts at this fraction of the max points.
+BEE_GENIUS_RATIO = 0.70
 
 # Fallback folder for individually-scraped crosswords (see crossword_scraper.py).
 # PUZZLE_DIR/the master index is a pre-baked historical archive that isn't meant
@@ -167,6 +176,10 @@ def init_db():
         columns = [col[1] for col in cursor.fetchall()]
         if 'avatar' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT '🧩'")
+        if 'is_admin' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+        if 'must_change_password' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0")
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS progress (
@@ -184,17 +197,31 @@ def init_db():
             )
         ''')
 
+        # Make the admin flag mirror ADMIN_USERNAMES exactly.
+        cursor.execute('UPDATE users SET is_admin = 0')
+        for name in ADMIN_USERNAMES:
+            cursor.execute('UPDATE users SET is_admin = 1 WHERE LOWER(username) = ?', (name,))
+
 
 init_db()
 
 
 def get_user_info(user_id):
-    """{'username', 'avatar'} for a user id, or None if the user is gone."""
+    """{'username', 'avatar', 'isAdmin', 'mustChange'} for a user id, or None if the user is gone."""
     with db() as conn:
-        row = conn.execute('SELECT username, avatar FROM users WHERE id = ?', (user_id,)).fetchone()
+        row = conn.execute(
+            'SELECT username, avatar, is_admin, must_change_password FROM users WHERE id = ?', (user_id,)
+        ).fetchone()
     if not row:
         return None
-    return {'username': row[0], 'avatar': row[1] or '🧩'}
+    return {'username': row[0], 'avatar': row[1] or '🧩',
+            'isAdmin': bool(row[2]), 'mustChange': bool(row[3])}
+
+
+def is_admin(user_id):
+    with db() as conn:
+        row = conn.execute('SELECT is_admin FROM users WHERE id = ?', (user_id,)).fetchone()
+    return bool(row and row[0])
 
 
 def get_progress_summary(user_id, since=None):
@@ -675,6 +702,83 @@ def change_username():
     return jsonify({'status': 'success', 'username': new_username})
 
 
+@app.route('/api/change-password', methods=['POST'])
+def change_password():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    current = data.get('currentPassword', '')
+    new = data.get('newPassword', '')
+
+    if not current or not new:
+        return jsonify({'error': 'Current and new password are required'}), 400
+    if new == current:
+        return jsonify({'error': 'New password must be different from the current one'}), 400
+
+    user_id = session['user_id']
+    with db() as conn:
+        row = conn.execute('SELECT password_hash FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not row or not check_password_hash(row[0], current):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+        conn.execute(
+            'UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?',
+            (generate_password_hash(new), user_id)
+        )
+    return jsonify({'status': 'success'})
+
+
+# --- Admin: account recovery -------------------------------------------------
+# There's no email on file, so "forgot password" is handled by an admin (see
+# ADMIN_USERNAMES) generating a one-time temporary password for the user and
+# passing it on. The user is nudged to pick their own password after logging in.
+_TEMP_PW_ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'  # no look-alike characters
+
+
+@app.route('/api/admin/users')
+def admin_list_users():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not is_admin(session['user_id']):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    with db() as conn:
+        rows = conn.execute('SELECT id, username, avatar FROM users ORDER BY LOWER(username)').fetchall()
+    return jsonify([{'userId': r[0], 'username': r[1], 'avatar': r[2] or '🧩'} for r in rows])
+
+
+@app.route('/api/admin/reset-password', methods=['POST'])
+def admin_reset_password():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    admin_id = session['user_id']
+    if not is_admin(admin_id):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    data = request.get_json(silent=True) or {}
+    try:
+        target_id = int(data.get('userId'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid user'}), 400
+    if target_id == admin_id:
+        return jsonify({'error': "Use 'Change Password' for your own account"}), 400
+
+    temp_password = ''.join(secrets.choice(_TEMP_PW_ALPHABET) for _ in range(10))
+    with db() as conn:
+        row = conn.execute('SELECT username FROM users WHERE id = ?', (target_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'User not found'}), 404
+        conn.execute(
+            'UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?',
+            (generate_password_hash(temp_password), target_id)
+        )
+
+    print(f"[admin] user id {admin_id} reset the password of user id {target_id} ({row[0]})", flush=True)
+    resp = jsonify({'status': 'success', 'username': row[0], 'tempPassword': temp_password})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @app.route('/api/logout', methods=['POST'])
 def logout():
     session.clear()
@@ -731,8 +835,19 @@ def get_friends_leaderboard():
     day_key = day_base + config['suffix']
     publisher = config['publisher']
 
+    if publisher == SPELLING_BEE_PUBLISHER:
+        # For Spelling Bee timer_seconds holds the score: highest first, people
+        # who haven't played (NULL) last.
+        order_by = '''CASE WHEN p.timer_seconds IS NULL THEN 1 ELSE 0 END,
+                p.timer_seconds DESC,
+                u.username ASC'''
+    else:
+        order_by = '''CASE WHEN p.completed = 1 THEN 1 ELSE 2 END,
+                p.timer_seconds ASC,
+                u.username ASC'''
+
     with db() as conn:
-        rows = conn.execute('''
+        rows = conn.execute(f'''
             SELECT u.id, u.username, u.avatar,
                    p.timer_seconds, p.completed, p.used_check, p.ratio
             FROM users u
@@ -742,9 +857,7 @@ def get_friends_leaderboard():
                 AND p.month = ?
                 AND p.day_key = ?
             ORDER BY
-                CASE WHEN p.completed = 1 THEN 1 ELSE 2 END,
-                p.timer_seconds ASC,
-                u.username ASC
+                {order_by}
         ''', (publisher, year, month, day_key)).fetchall()
 
     results = []
@@ -820,6 +933,18 @@ def get_user_stats():
             except Exception:
                 pass
 
+    # Spelling Bee: "completed" only means Queen Bee, so it needs its own query
+    # that counts every day the user actually scored on.
+    with db() as conn:
+        bee_rows = conn.execute('''
+            SELECT ratio, timer_seconds, completed
+            FROM progress
+            WHERE user_id = ? AND publisher = ? AND timer_seconds > 0
+        ''', (user_id, SPELLING_BEE_PUBLISHER)).fetchall()
+    bee_scores = [r[1] for r in bee_rows]
+    bee_queen = sum(1 for r in bee_rows if r[2] or (r[0] or 0) >= 1.0)
+    bee_genius = sum(1 for r in bee_rows if r[2] or (r[0] or 0) >= BEE_GENIUS_RATIO - 1e-9)  # Genius or better
+
     def calc_avg(arr):
         return round(sum(arr) / len(arr)) if arr else None
 
@@ -835,6 +960,10 @@ def get_user_stats():
         'wordleCount': wordle_total,
         'wordleWinRate': round((wordle_wins / wordle_total) * 100) if wordle_total else None,
         'wordleGuessDistribution': wordle_guess_dist,      # {"1": count, ..., "6": count}, wins only
+        'beeCount': len(bee_scores),
+        'beeAvgScore': calc_avg(bee_scores),
+        'beeGeniusCount': bee_genius,                      # Genius or better
+        'beeQueenCount': bee_queen,
         'crosswordByDay': {
             day: {'avg': calc_avg(times), 'count': len(times)}
             for day, times in crossword_times.items()

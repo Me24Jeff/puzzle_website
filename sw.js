@@ -19,9 +19,9 @@ const CDN_HOSTS = ['cdn.tailwindcss.com'];
 
 // Fetched (best effort) when the worker installs. Anything missing is skipped.
 const PRECACHE = [
-  '/static/apple-touch-icon.png',
-  '/static/icon-192.png',
-  '/static/icon-512.png',
+  '/static/icon/apple-touch-icon.png',
+  '/static/icon/192.png',
+  '/static/icon/512.png',
   '/static/site.webmanifest',
   'https://cdn.tailwindcss.com',
 ];

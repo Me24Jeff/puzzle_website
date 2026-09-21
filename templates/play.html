@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <!-- iOS / Apple Home Screen Icon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icon/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Crossword">
 
@@ -10,8 +10,8 @@
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
     {% include '_sw.html' %}
-    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon/192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon/512.png">
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -163,7 +163,9 @@
         .kb-key:active { background: #cbd5e1; }
         .kb-key.func-key { background: #cbd5e1; color: #0f172a; }
         .kb-key.active-toggle { background: #111; color: white; }
-        .toolbtn.active { background: #111; color: white; }
+        /* !important: on touch screens the button keeps :hover after a tap, and Tailwind's
+           hover:bg-* would otherwise win over this until you tap somewhere else. */
+        .toolbtn.active { background: #111 !important; color: white !important; }
 
         @media (prefers-color-scheme: dark) {
             #keyboard { background: #262626; }
@@ -171,7 +173,7 @@
             .kb-key:active { background: #52525b; }
             .kb-key.func-key { background: #52525b; color: #f1f5f9; }
             .kb-key.active-toggle { background: #2563eb; color: white; }
-            .toolbtn.active { background: #2563eb; color: white; }
+            .toolbtn.active { background: #2563eb !important; color: white !important; }
         }
 
         #key-popover {
@@ -704,15 +706,7 @@
                     div.innerHTML = `<span class="font-bold min-w-[24px] text-right">${c.number}.</span><span class="flex-1">${c.text}</span>`;
                     div.addEventListener('click', () => {
                         direction = type;
-                        curCol = c.cells[0][0];
-                        curRow = c.cells[0][1];
-                        for (let i = 0; i < c.cells.length; i++) {
-                            const [x, y] = c.cells[i];
-                            if (!isCellVerified(y, x)) {
-                                curCol = x; curRow = y;
-                                break;
-                            }
-                        }
+                        [curCol, curRow] = firstTargetCell(c);
                         render();
                     });
                     container.appendChild(div);
@@ -859,17 +853,24 @@
             const target = list[idx];
             if (!target) return;
 
-            let targetCell = target.cells[0];
-            for (let i = 0; i < target.cells.length; i++) {
-                const [x, y] = target.cells[i];
-                if (!isCellVerified(y, x)) {
-                    targetCell = target.cells[i];
-                    break;
-                }
-            }
-            curCol = targetCell[0];
-            curRow = targetCell[1];
+            [curCol, curRow] = firstTargetCell(target);
             render();
+        }
+
+        function hasLetter(row, col) {
+            const e = userGrid[row] && userGrid[row][col];
+            return !!(e && e.letter);
+        }
+
+        // Where the cursor lands when jumping to a word (next/prev clue, clicking a clue):
+        //  - autocheck on:  the first cell that isn't verified-correct yet
+        //  - autocheck off: the first cell that's still empty (leading filled letters are skipped)
+        // Falls back to the first cell if the whole word is already done.
+        function firstTargetCell(clue) {
+            for (const [x, y] of clue.cells) {
+                if (autoCheck ? !isCellVerified(y, x) : !hasLetter(y, x)) return [x, y];
+            }
+            return clue.cells[0];
         }
 
         function gotoPreviousWordEnd() {
@@ -943,7 +944,7 @@
                         }
                     }
 
-                    if (firstUnfilledIdx !== -1 && firstUnfilledIdx !== idx) {
+                    if (firstUnfilledIdx !== -1) {
                         exitRebus();
                         [curCol, curRow] = clue.cells[firstUnfilledIdx];
                     } else {
