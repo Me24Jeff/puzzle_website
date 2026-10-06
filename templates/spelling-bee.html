@@ -219,12 +219,12 @@
 
     <!-- Rankings Modal -->
     <div id="rankings-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
-        <div class="bg-[#1c1c1e] text-white rounded-3xl p-6 max-w-sm w-full max-h-[90vh] flex flex-col shadow-2xl relative border border-neutral-800">
-            <button onclick="closeRankingsModal()" class="absolute top-4 right-4 text-neutral-400 hover:text-white text-2xl font-bold leading-none">&times;</button>
-            <h2 class="text-2xl font-black mb-1">Rankings</h2>
-            <p class="text-xs text-neutral-400 mb-5">Ranks are based on a percentage of possible points in a puzzle.</p>
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 max-w-sm w-full max-h-[90vh] flex flex-col shadow-2xl relative border border-slate-100 dark:border-neutral-700">
+            <button onclick="closeRankingsModal()" class="absolute top-4 right-4 text-neutral-400 hover:text-slate-900 dark:hover:text-white text-2xl font-bold leading-none">&times;</button>
+            <h2 class="text-2xl font-black text-slate-900 dark:text-white mb-1">Rankings</h2>
+            <p class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">Ranks are based on a percentage of possible points in a puzzle.</p>
 
-            <div class="flex justify-between text-xs font-bold text-neutral-400 px-3 mb-2">
+            <div class="flex justify-between text-sm font-bold text-slate-600 dark:text-neutral-400 px-3 mb-4">
                 <span>Rank</span>
                 <span>Minimum score</span>
             </div>
@@ -281,18 +281,19 @@
 
         <!-- Rank / progress bar (clickable to show Rankings modal) -->
         <div onclick="openRankingsModal()" class="px-4 pt-3 shrink-0 flex items-center gap-3 cursor-pointer select-none">
-            <span id="rank-label" class="text-sm font-bold text-slate-900 dark:text-white shrink-0">Beginner</span>
+            <span id="rank-label" class="font-bold text-slate-900 dark:text-white shrink-0">Beginner</span>
             <div id="progress-track"></div>
         </div>
 
         <!-- Top Found-words container (Placed below progress bar) -->
         <div class="px-4 pt-2.5 shrink-0">
             <div onclick="toggleWordlist()" class="flex items-center justify-between py-2 px-3 bg-slate-100 dark:bg-neutral-800 rounded-lg cursor-pointer border border-slate-200 dark:border-neutral-700 select-none min-w-0">
-                <span id="found-count-label" class="text-sm sm:text-base font-semibold text-slate-700 dark:text-neutral-300 truncate pr-2">0 Words Found</span>
-                <span id="found-chevron" class="text-xs text-slate-500 dark:text-neutral-400 transform transition-transform duration-200 shrink-0">▼</span>
+                <span id="found-count-label" class="font-semibold text-slate-700 dark:text-neutral-300 truncate pr-2">0 Words Found</span>
+                <span id="found-chevron" class="text-slate-500 dark:text-neutral-400 transform transition-transform duration-200 shrink-0">▼</span>
             </div>
-            <div id="wordlist-panel" class="hidden mt-2 p-3 bg-slate-50 dark:bg-neutral-900 border border-slate-200 dark:border-neutral-700 rounded-lg max-h-36 overflow-y-auto">
-                <div id="found-words-grid" class="text-sm sm:text-base text-slate-700 dark:text-neutral-300 leading-relaxed"></div>
+
+            <div id="wordlist-panel" class="hidden mt-2 p-3 bg-slate-50 dark:bg-neutral-900 border border-slate-200 dark:border-neutral-700 rounded-lg overflow-x-auto max-h-42">
+                <div id="found-words-grid" class="flex flex-col flex-wrap align-content-start max-h-40 gap-x-6 gap-y-0.5 text-slate-700 dark:text-neutral-300 w-max pr-3"></div>
             </div>
         </div>
 
@@ -644,22 +645,25 @@
                     return `
                         <div class="bg-[#f7da21] text-black rounded-2xl p-3 flex flex-col my-1 shadow-md">
                             <div class="flex items-center justify-between font-bold text-sm">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3.5 h-3.5 bg-black rounded-full inline-block"></span>
+                                <div class="flex items-center gap-2.5">
+                                    <!-- Replaced the solid circle with a score badge -->
+                                    <span class="min-w-[1.75rem] h-7 px-1.5 bg-black text-[#f7da21] rounded-full flex items-center justify-center font-mono text-xs font-black shadow-inner">
+                                        ${score}
+                                    </span>
                                     <span class="font-bold text-base">${r.name}</span>
                                 </div>
                                 <span class="font-mono text-base font-bold">${minScore}</span>
                             </div>
-                            <div class="text-[11px] font-semibold text-neutral-800 mt-1 pl-5">
+                            <div class="text-[11px] font-semibold text-neutral-800 mt-1 pl-9">
                                 ${nextInfo}
                             </div>
                         </div>
                     `;
                 } else {
                     return `
-                        <div class="flex items-center justify-between py-2 px-3 text-sm font-medium text-neutral-300 border-l-2 border-neutral-700 ml-1.5 pl-4">
+                        <div class="flex items-center justify-between py-2 px-3 text-sm font-medium text-slate-700 dark:text-neutral-300 border-l-2 border-slate-200 dark:border-neutral-700 ml-1.5 pl-4">
                             <span>${r.name}</span>
-                            <span class="font-mono text-neutral-400">${minScore}</span>
+                            <span class="font-mono text-slate-500 dark:text-neutral-400">${minScore}</span>
                         </div>
                     `;
                 }
@@ -697,26 +701,27 @@
         // --- Found words panel & Most Recently Found Preview ---
         function renderWordlist() {
             const labelEl = document.getElementById('found-count-label');
+            const grid = document.getElementById('found-words-grid');
 
-            // Reverse so most recently found words appear first
             const recentWords = [...foundWords].reverse();
-
             if (recentWords.length === 0) {
                 labelEl.textContent = "0 Words Found";
-            } else {
-                const lowerWords = recentWords.map(w => w.toLowerCase());
-                labelEl.textContent = lowerWords.join(", ");
-            }
-
-            const grid = document.getElementById('found-words-grid');
-            if (recentWords.length === 0) {
                 grid.innerHTML = `<p class="text-slate-400 dark:text-neutral-500 font-medium italic">Words you find will appear here.</p>`;
                 return;
             }
+            labelEl.textContent = recentWords.map(w => w.toLowerCase()).join(", ");
 
-            grid.innerHTML = recentWords.map(w =>
-                `<span class="inline-block font-semibold py-0.5 text-slate-800 dark:text-neutral-200 capitalize">${w.toLowerCase()}${isPangram(w) ? ' <span class="text-amber-500">&#9733;</span>' : ''}</span>`
-            ).join('<span class="text-slate-300 dark:text-neutral-600 mx-1.5">•</span>');
+            const sortedWords = [...foundWords].sort((a, b) =>
+                a.localeCompare(b, undefined, { sensitivity: 'base' })
+            );
+            grid.innerHTML = sortedWords.map(w => {
+                const isPang = isPangram(w);
+                const colorClass = isPang
+                    ? 'text-amber-500 dark:text-amber-400 font-bold'
+                    : 'text-slate-700 dark:text-neutral-300';
+
+                return `<span class="block font-semibold py-0.5 capitalize whitespace-nowrap ${colorClass}">${w.toLowerCase()}</span>`;
+            }).join('');
         }
 
         function toggleWordlist() {
