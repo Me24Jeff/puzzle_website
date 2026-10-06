@@ -245,7 +245,7 @@
                     <span id="modal-score" class="font-mono text-slate-900 dark:text-white">0</span>
                 </div>
             </div>
-            <button onclick="closeResultModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition active:scale-95 shadow-md">
+            <button id="modal-close-btn" onclick="closeResultModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-3 px-6 rounded-xl transition active:scale-95 shadow-md">
                 Keep Playing
             </button>
         </div>
@@ -608,15 +608,16 @@
             track.appendChild(marker);
         }
 
-        // --- Rankings Modal (Hides Queen Bee) ---
+        // --- Rankings Modal (Queen Bee hidden until reached) ---
         function renderRankingsModal() {
             const listEl = document.getElementById('rankings-list');
             const currentIdx = currentRankIndex();
             const geniusPct = RANKS.find(r => r.name === "Genius").pct;
             const geniusScore = Math.round(MAX_POINTS * geniusPct);
 
-            // Filter out Queen Bee from rankings popup
-            const ranksToDisplay = RANKS.filter(r => r.name !== "Queen Bee");
+            // Queen Bee stays hidden (no spoiler) until you actually reach it, then it shows as your rank.
+            const queenReached = RANKS[currentIdx].name === "Queen Bee";
+            const ranksToDisplay = RANKS.filter(r => r.name !== "Queen Bee" || queenReached);
             const reversedRanks = ranksToDisplay.map(r => ({
                 ...r,
                 originalIdx: RANKS.findIndex(x => x.name === r.name)
@@ -690,6 +691,8 @@
                     ? "You found every word. Incredible."
                     : "You're crushing it.";
                 document.getElementById('modal-score').textContent = score;
+                // Nothing left to find at Queen Bee, so don't say "Keep Playing".
+                document.getElementById('modal-close-btn').textContent = rank.name === "Queen Bee" ? "Done" : "Keep Playing";
                 document.getElementById('result-modal').classList.remove('hidden');
             }
         }

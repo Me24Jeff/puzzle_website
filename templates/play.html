@@ -723,7 +723,13 @@
                 const isCurrent = cur && +el.dataset.number === cur.number && el.dataset.type === direction;
                 if (isCurrent) {
                     el.className = 'clue-item p-1.5 rounded cursor-pointer transition text-slate-900 font-semibold bg-[#a9d8f5] dark:bg-[#2c5a82] dark:text-white flex gap-2';
-                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    // Scroll only the clue list itself (scrollIntoView can also scroll the page/grid).
+                    const list = el.parentElement;
+                    if (list && list.scrollHeight > list.clientHeight + 2) {
+                        const lr = list.getBoundingClientRect(), er = el.getBoundingClientRect();
+                        if (er.top < lr.top) list.scrollTo({ top: list.scrollTop + (er.top - lr.top) - 4, behavior: 'smooth' });
+                        else if (er.bottom > lr.bottom) list.scrollTo({ top: list.scrollTop + (er.bottom - lr.bottom) + 4, behavior: 'smooth' });
+                    }
                 } else {
                     el.className = 'clue-item p-1.5 rounded cursor-pointer hover:bg-slate-200 dark:hover:bg-neutral-700 transition text-slate-800 dark:text-slate-200 flex gap-2';
                 }
@@ -833,42 +839,60 @@
             }
         }
 
-        function gotoAdjacentClue(delta) {
-            exitRebus();
-            let list = puzzle.clues[direction];
-            const cur = currentClue();
-            let idx = cur ? list.findIndex(c => c.number === cur.number) : 0;
-            idx += delta;
-
-            if (idx >= list.length) {
-                direction = direction === 'across' ? 'down' : 'across';
-                list = puzzle.clues[direction];
-                idx = 0;
-            } else if (idx < 0) {
-                direction = direction === 'across' ? 'down' : 'across';
-                list = puzzle.clues[direction];
-                idx = list.length - 1;
-            }
-
-            const target = list[idx];
-            if (!target) return;
-
-            [curCol, curRow] = firstTargetCell(target);
-            render();
-        }
-
         function hasLetter(row, col) {
             const e = userGrid[row] && userGrid[row][col];
             return !!(e && e.letter);
         }
 
-        // Where the cursor lands when jumping to a word (next/prev clue, clicking a clue):
-        //  - autocheck on:  the first cell that isn't verified-correct yet
-        //  - autocheck off: the first cell that's still empty (leading filled letters are skipped)
-        // Falls back to the first cell if the whole word is already done.
+        // A cell counts as "done" (skipped by navigation) when:
+        //  - autocheck on:  it is verified-correct
+        //  - autocheck off: it contains any letter
+        function isCellDone(row, col) {
+            return autoCheck ? isCellVerified(row, col) : hasLetter(row, col);
+        }
+
+        // Across clues followed by down clues, as one cyclic sequence.
+        function allClueSequence() {
+            return [
+                ...puzzle.clues.across.map(c => ({ clue: c, dir: 'across' })),
+                ...puzzle.clues.down.map(c => ({ clue: c, dir: 'down' }))
+            ];
+        }
+
+        // Jump to the next (delta=1) / previous (delta=-1) word that still has an empty cell,
+        // landing on its first empty cell. Completely filled words are skipped.
+        // If every word is full, falls back to plain next/previous word.
+        function gotoAdjacentClue(delta) {
+            exitRebus();
+            const seq = allClueSequence();
+            if (!seq.length) return;
+            const cur = currentClue();
+            let start = seq.findIndex(s => s.dir === direction && cur && s.clue.number === cur.number);
+            if (start < 0) start = 0;
+
+            const n = seq.length;
+            for (let step = 1; step <= n; step++) {
+                const entry = seq[((start + delta * step) % n + n) % n];
+                const empty = entry.clue.cells.find(([x, y]) => !isCellDone(y, x));
+                if (empty) {
+                    direction = entry.dir;
+                    [curCol, curRow] = empty;
+                    render();
+                    return;
+                }
+            }
+            // Everything is filled: plain neighbouring word, first cell.
+            const entry = seq[((start + delta) % n + n) % n];
+            direction = entry.dir;
+            [curCol, curRow] = entry.clue.cells[0];
+            render();
+        }
+
+        // Where the cursor lands when jumping to a specific word (clicking a clue):
+        // the first empty cell, or the first cell if the whole word is done.
         function firstTargetCell(clue) {
             for (const [x, y] of clue.cells) {
-                if (autoCheck ? !isCellVerified(y, x) : !hasLetter(y, x)) return [x, y];
+                if (!isCellDone(y, x)) return [x, y];
             }
             return clue.cells[0];
         }
@@ -915,43 +939,53 @@
             }
         }
 
+        // After entering a letter: move to the closest empty cell.
+        //  1. later empty cells in this word,
+        //  2. earlier empty cells in this word,
+        //  3. the next words (cycling across -> down -> across...) that have an empty cell.
+        // Filled letters and filled words are skipped. If nothing is empty the cursor stays.
         function advanceCursor() {
             const clue = currentClue();
             if (!clue) return;
 
             const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
 
-            let nextIdx = -1;
-            for (let i = idx + 1; i < clue.cells.length; i++) {
+            // Autocheck off: inside a word just step to the next letter (no skipping, so
+            // existing letters can be overwritten). Skipping only happens when jumping words.
+            if (!autoCheck && idx >= 0 && idx < clue.cells.length - 1) {
+                exitRebus();
+                [curCol, curRow] = clue.cells[idx + 1];
+                return;
+            }
+
+            // Autocheck off: never move around inside the word; at its end go to the next word.
+            const order = [];
+            if (autoCheck) {
+                for (let i = idx + 1; i < clue.cells.length; i++) order.push(i);
+                for (let i = 0; i < idx; i++) order.push(i);
+            }
+
+            for (const i of order) {
                 const [x, y] = clue.cells[i];
-                if (!isCellVerified(y, x)) {
-                    nextIdx = i;
-                    break;
+                if (!isCellDone(y, x)) {
+                    exitRebus();
+                    [curCol, curRow] = clue.cells[i];
+                    return;
                 }
             }
 
-            if (nextIdx !== -1) {
-                exitRebus();
-                [curCol, curRow] = clue.cells[nextIdx];
-            } else {
-                if (autoCheck) {
-                    let firstUnfilledIdx = -1;
-                    for (let i = 0; i < clue.cells.length; i++) {
-                        const [x, y] = clue.cells[i];
-                        if (!isCellVerified(y, x)) {
-                            firstUnfilledIdx = i;
-                            break;
-                        }
-                    }
-
-                    if (firstUnfilledIdx !== -1) {
-                        exitRebus();
-                        [curCol, curRow] = clue.cells[firstUnfilledIdx];
-                    } else {
-                        gotoAdjacentClue(1);
-                    }
-                } else {
-                    gotoAdjacentClue(1);
+            // Word is complete: go to the next word with an empty cell (if any).
+            const seq = allClueSequence();
+            let start = seq.findIndex(s => s.dir === direction && s.clue.number === clue.number);
+            if (start < 0) start = 0;
+            for (let step = 1; step < seq.length; step++) {
+                const entry = seq[(start + step) % seq.length];
+                const empty = entry.clue.cells.find(([x, y]) => !isCellDone(y, x));
+                if (empty) {
+                    exitRebus();
+                    direction = entry.dir;
+                    [curCol, curRow] = empty;
+                    return;
                 }
             }
         }
@@ -1073,8 +1107,8 @@
             const cellSize = baseCell * zoom;
 
             gridEl.style.maxWidth = 'none';
-            gridEl.style.width = Math.round(cellSize * cols) + 'px';
-            gridEl.style.height = Math.round(cellSize * rows) + 'px';
+            gridEl.style.width = Math.floor(cellSize * cols) + 'px';
+            gridEl.style.height = Math.floor(cellSize * rows) + 'px';
         }
 
         function applyZoomAtPoint(newZoom, focalX, focalY) {
@@ -1131,16 +1165,25 @@
             let scrollDx = 0;
             let scrollDy = 0;
 
-            if (targetLeft - margin < wrapperRect.left) {
-                scrollDx = (targetLeft - margin) - wrapperRect.left;
-            } else if (targetRight + margin > wrapperRect.right) {
-                scrollDx = (targetRight + margin) - wrapperRect.right;
+            // Only scroll on an axis that actually overflows; otherwise the grid is fully
+            // visible and scrolling would just make it jitter.
+            const overflowX = wrapper.scrollWidth - wrapper.clientWidth > 2;
+            const overflowY = wrapper.scrollHeight - wrapper.clientHeight > 2;
+
+            if (overflowX) {
+                if (targetLeft - margin < wrapperRect.left) {
+                    scrollDx = (targetLeft - margin) - wrapperRect.left;
+                } else if (targetRight + margin > wrapperRect.right) {
+                    scrollDx = (targetRight + margin) - wrapperRect.right;
+                }
             }
 
-            if (targetTop - margin < wrapperRect.top) {
-                scrollDy = (targetTop - margin) - wrapperRect.top;
-            } else if (targetBottom + margin > wrapperRect.bottom) {
-                scrollDy = (targetBottom + margin) - wrapperRect.bottom;
+            if (overflowY) {
+                if (targetTop - margin < wrapperRect.top) {
+                    scrollDy = (targetTop - margin) - wrapperRect.top;
+                } else if (targetBottom + margin > wrapperRect.bottom) {
+                    scrollDy = (targetBottom + margin) - wrapperRect.bottom;
+                }
             }
 
             if (scrollDx !== 0 || scrollDy !== 0) {
