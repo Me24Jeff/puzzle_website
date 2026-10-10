@@ -374,6 +374,7 @@
         const HARD_KEY = 'wordle-hard-mode';
         let hardMode = false;
         try { hardMode = localStorage.getItem(HARD_KEY) === '1'; } catch (e) {}
+        if (hardMode) document.getElementById('hard-mode-btn').classList.toggle('active', hardMode);
 
         function toggleHardMode() {
             if (gameOver) return;
