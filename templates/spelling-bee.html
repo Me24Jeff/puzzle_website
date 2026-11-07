@@ -10,6 +10,7 @@
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
     {% include '_sw.html' %}
+    {% include '_viewport_fix.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon/192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon/512.png">
 
@@ -34,7 +35,7 @@
         body { background: #f1f5f9; }
         @media (prefers-color-scheme: dark) { body { background: #1c1c1e; } }
 
-        #page { height: 100vh; height: 100dvh; }
+        #page { height: 100%; }
 
         /* ---- Word input row & Blinking Cursor ---- */
         #word-display {
@@ -561,7 +562,7 @@
         function currentRankIndex() {
             let idx = 0;
             for (let i = 0; i < RANKS.length; i++) {
-                if (score >= RANKS[i].pct * MAX_POINTS) idx = i;
+                if (score >= Math.round(RANKS[i].pct * MAX_POINTS)) idx = i;
             }
             return idx;
         }
@@ -761,7 +762,7 @@
                 body: JSON.stringify({
                     userGrid: { foundWords: foundWords },
                     timerSeconds: score,               // repurposed: current score
-                    ratio: Math.min(1, score / MAX_POINTS),
+                    ratio: Math.min(1, Math.max(score / MAX_POINTS, RANKS[currentRankIndex()].pct)),
                     completed: score >= MAX_POINTS,
                     usedCheck: celebratedRank === "Queen Bee"
                 })
@@ -783,8 +784,8 @@
             if (saved && saved.userGrid && Array.isArray(saved.userGrid.foundWords)) {
                 foundWords = saved.userGrid.foundWords.filter(w => ANSWERS.has(w));
                 score = foundWords.reduce((sum, w) => sum + scoreForWord(w), 0);
-                if (score >= RANKS.find(r => r.name === "Queen Bee").pct * MAX_POINTS) celebratedRank = "Queen Bee";
-                else if (score >= RANKS.find(r => r.name === "Genius").pct * MAX_POINTS) celebratedRank = "Genius";
+                if (score >= Math.round(RANKS.find(r => r.name === "Queen Bee").pct * MAX_POINTS)) celebratedRank = "Queen Bee";
+                else if (score >= Math.round(RANKS.find(r => r.name === "Genius").pct * MAX_POINTS)) celebratedRank = "Genius";
             }
             renderScore();
             renderWordlist();

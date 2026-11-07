@@ -10,6 +10,7 @@
     <link rel="manifest" href="/static/site.webmanifest">
     <meta name="mobile-web-app-capable" content="yes">
     {% include '_sw.html' %}
+    {% include '_viewport_fix.html' %}
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon/192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/static/icon/512.png">
 
@@ -38,10 +39,7 @@
             body { background: #1c1c1e; }
         }
 
-        #page {
-            height: 100vh;
-            height: 100dvh;
-        }
+        #page { height: 100%; }
 
         /* Wordle tile grid */
         #board-container {

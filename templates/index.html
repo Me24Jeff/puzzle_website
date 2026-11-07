@@ -239,62 +239,10 @@
         </div>
 
         <!-- Solve Time Statistics -->
-        <div class="bg-white dark:bg-neutral-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-neutral-700 space-y-4">
-            <h2 class="text-base font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide text-xs">Your Averages</h2>
-
-            <!-- Quick Averages: Mini, Midi & Wordle -->
-            <div class="grid grid-cols-3 gap-3">
-                <div class="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-blue-600 dark:text-blue-400 mb-1">The Mini</div>
-                    <div id="stat-mini-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
-                    <div id="stat-mini-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 solved</div>
-                </div>
-                <div class="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-indigo-600 dark:text-indigo-400 mb-1">The Midi</div>
-                    <div id="stat-midi-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
-                    <div id="stat-midi-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 solved</div>
-                </div>
-                <div class="bg-purple-50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-purple-600 dark:text-purple-400 mb-1">Wordle</div>
-                    <div id="stat-wordle-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
-                    <div id="stat-wordle-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 played</div>
-                </div>
-            </div>
-
-            <!-- Spelling Bee -->
-            <div class="grid grid-cols-3 gap-3">
-                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Bee Avg</div>
-                    <div id="stat-bee-avg" class="text-xl font-black text-slate-800 dark:text-white">--</div>
-                    <div id="stat-bee-count" class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">0 played</div>
-                </div>
-                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Genius</div>
-                    <div id="stat-bee-genius" class="text-xl font-black text-slate-800 dark:text-white">0</div>
-                    <div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">days</div>
-                </div>
-                <div class="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3.5 rounded-xl">
-                    <div class="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-1">Queen Bee</div>
-                    <div id="stat-bee-queen" class="text-xl font-black text-slate-800 dark:text-white">0</div>
-                    <div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">days</div>
-                </div>
-            </div>
-
-            <!-- Detailed Crossword Averages by Day of the Week -->
-            <div>
-                <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">The Crossword (By Day of Week)</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm" id="crossword-days-grid">
-                    <!-- Populated dynamically -->
-                </div>
-            </div>
-
-            <!-- Wordle Guess Distribution -->
-            <div>
-                <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">Wordle Guess Distribution</h3>
-                <div class="space-y-1.5" id="wordle-guess-distribution">
-                    <!-- Populated dynamically -->
-                </div>
-            </div>
+        <!-- Per-puzzle statistics (tap a bar to expand) -->
+        <div class="space-y-2.5">
+            <h2 class="font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide text-xs px-1">Your Stats</h2>
+            <div id="stats-accordion" class="space-y-2.5"></div>
         </div>
 
         <!-- Admin: account recovery (only shown to admins) -->
@@ -631,73 +579,145 @@
             container.innerHTML = html;
         }
 
-        async function loadUserStats() {
-            const stats = await fetchJsonCached('/api/user/stats', 60000);
-            if (!stats) return;
+        const STAT_SECTIONS = [
+            { id: 'wordle', name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
+            { id: 'bee',    name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
+            { id: 'mini',   name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
+            { id: 'midi',   name: 'Midi',         color: '#7ca8f1', icon: '/static/midi/progress-0.svg' },
+            { id: 'normal', name: 'Crossword',    color: '#6593e6', icon: '/static/normal/progress-0.svg' },
+        ];
 
-            document.getElementById('stat-mini-avg').textContent = formatTime(stats.miniAvg);
-            document.getElementById('stat-mini-count').textContent = `${stats.miniCount} solved`;
+        function buildStatsAccordion() {
+            const container = document.getElementById('stats-accordion');
+            if (!container || container.childElementCount > 0) return;
+            container.innerHTML = STAT_SECTIONS.map(s => `
+                <div class="rounded-2xl overflow-hidden border border-slate-200 dark:border-neutral-700 shadow-sm">
+                    <button id="stat-btn-${s.id}" onclick="toggleStatSection('${s.id}')" aria-expanded="false"
+                            class="w-full flex items-center gap-3 px-4 py-3 text-left"
+                            style="background-color: ${s.color}; color: #0f172a;">
+                        <img src="${s.icon}" alt="" class="w-9 h-9 object-contain shrink-0" onerror="this.style.display='none'">
+                        <span class="flex-1 text-base font-extrabold">${s.name}</span>
+                        <svg id="stat-chevron-${s.id}" class="w-5 h-5 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+                    <div id="stat-body-${s.id}" class="hidden bg-white dark:bg-neutral-800 p-4 space-y-4">
+                        <p class="text-xs text-slate-400 dark:text-neutral-500">Loading...</p>
+                    </div>
+                </div>
+            `).join('');
+        }
 
-            document.getElementById('stat-midi-avg').textContent = formatTime(stats.midiAvg);
-            document.getElementById('stat-midi-count').textContent = `${stats.midiCount} solved`;
+        function toggleStatSection(id) {
+            const body = document.getElementById(`stat-body-${id}`);
+            const chevron = document.getElementById(`stat-chevron-${id}`);
+            const btn = document.getElementById(`stat-btn-${id}`);
+            const hiddenNow = body.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180', !hiddenNow);
+            btn.setAttribute('aria-expanded', String(!hiddenNow));
+        }
 
-            document.getElementById('stat-wordle-avg').textContent = (stats.wordleAvg !== null && stats.wordleAvg !== undefined) ? `${stats.wordleAvg}` : '--';
-            const winRateStr = (stats.wordleWinRate !== null && stats.wordleWinRate !== undefined) ? ` &middot; ${stats.wordleWinRate}% won` : '';
-            document.getElementById('stat-wordle-count').innerHTML = `${stats.wordleCount} played${winRateStr}`;
+        function statTile(label, value, sub) {
+            return `
+                <div class="bg-slate-50 dark:bg-neutral-900 border border-slate-100 dark:border-neutral-700 rounded-xl p-3">
+                    <div class="text-[11px] font-bold text-slate-500 dark:text-neutral-400 mb-0.5">${escapeHtml(label)}</div>
+                    <div class="text-xl font-black text-slate-800 dark:text-white break-words">${escapeHtml(value)}</div>
+                    ${sub ? `<div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">${escapeHtml(sub)}</div>` : ''}
+                </div>`;
+        }
 
-            document.getElementById('stat-bee-avg').textContent = (stats.beeAvgScore !== null && stats.beeAvgScore !== undefined) ? stats.beeAvgScore : '--';
-            document.getElementById('stat-bee-count').textContent = `${stats.beeCount || 0} played`;
-            document.getElementById('stat-bee-genius').textContent = stats.beeGeniusCount || 0;
-            document.getElementById('stat-bee-queen').textContent = stats.beeQueenCount || 0;
+        function statGrid(tiles, cols) {
+            return `<div class="grid ${cols === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2.5">${tiles.join('')}</div>`;
+        }
 
-            const daysGrid = document.getElementById('crossword-days-grid');
-            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        function distBars(title, items, color, emptyText) {
+            const total = items.reduce((a, b) => a + b.count, 0);
+            let inner;
+            if (total === 0) {
+                inner = `<p class="text-xs text-slate-400 dark:text-neutral-500">${emptyText}</p>`;
+            } else {
+                const max = Math.max(1, ...items.map(i => i.count));
+                inner = items.map(i => {
+                    const pct = Math.round((i.count / max) * 100);
+                    return `
+                        <div class="flex items-center gap-2">
+                            <span class="w-20 text-xs font-bold text-slate-500 dark:text-neutral-400 truncate">${escapeHtml(i.label)}</span>
+                            <div class="flex-1 h-5 bg-slate-100 dark:bg-neutral-900 rounded-md overflow-hidden">
+                                <div class="h-full rounded-md transition-all" style="width: ${i.count > 0 ? Math.max(pct, 6) : 0}%; background-color: ${color};"></div>
+                            </div>
+                            <span class="w-6 text-xs font-semibold text-slate-500 dark:text-neutral-400 text-right">${i.count}</span>
+                        </div>`;
+                }).join('');
+            }
+            return `<div><h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">${title}</h3><div class="space-y-1.5">${inner}</div></div>`;
+        }
 
-            let html = '';
-            daysOrder.forEach(day => {
-                const dayData = stats.crosswordByDay[day] || { avg: null, count: 0 };
-                const timeStr = formatTime(dayData.avg);
-                html += `
+        const dash = v => (v === null || v === undefined) ? '--' : String(v);
+
+        function renderWordleStats(w) {
+            const dist = [1, 2, 3, 4, 5, 6].map(n => ({ label: String(n), count: (w.distribution || {})[String(n)] || 0 }));
+            return statGrid([
+                statTile('Avg guesses', dash(w.avgGuesses), 'per win'),
+                statTile('Played', String(w.played)),
+                statTile('Won', w.winRate === null ? '--' : `${w.winRate}%`, `${w.wins} of ${w.played}`),
+            ], 3) + distBars('Guess Distribution', dist, '#a78bfa', 'No solved Wordles yet.');
+        }
+
+        function renderBeeStats(b) {
+            const longest = b.longestWord ? b.longestWord.charAt(0) + b.longestWord.slice(1).toLowerCase() : '--';
+            const dist = (b.rankDistribution || []).map(r => ({ label: r.name, count: r.count }));
+            return statGrid([
+                statTile('Played', String(b.played), 'days'),
+                statTile('Geniuses', String(b.genius), 'days'),
+                statTile('Queen Bees', String(b.queen), 'days'),
+                statTile('Total words', String(b.totalWords)),
+                statTile('Pangrams', String(b.pangrams)),
+                statTile('Longest word', longest, b.longestWord ? `${b.longestWord.length} letters` : ''),
+            ], 2) + distBars('Rank Distribution', dist, '#f5b800', 'No Spelling Bee played yet.');
+        }
+
+        function renderXwStats(x) {
+            return statGrid([
+                statTile('Played', String(x.played)),
+                statTile('Solved', x.solveRate === null ? '--' : `${x.solveRate}%`, `${x.solved} of ${x.played}`),
+                statTile('Avg time', formatTime(x.avgTime), 'solved puzzles'),
+            ], 3);
+        }
+
+        function renderCrosswordStats(x) {
+            const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            const days = order.map(day => {
+                const d = (x.byDay || {})[day] || { avg: null, count: 0 };
+                return `
                     <div class="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-neutral-900 rounded-xl border border-slate-100 dark:border-neutral-700">
                         <span class="font-semibold text-slate-700 dark:text-neutral-300 text-xs">${day}</span>
                         <div class="text-right">
-                            <span class="font-bold text-slate-800 dark:text-white text-sm">${timeStr}</span>
-                            <span class="text-[10px] text-slate-400 dark:text-neutral-500 block">${dayData.count} solved</span>
+                            <span class="font-bold text-slate-800 dark:text-white text-sm">${formatTime(d.avg)}</span>
+                            <span class="text-[10px] text-slate-400 dark:text-neutral-500 block">${d.count} solved</span>
                         </div>
-                    </div>
-                `;
-            });
-            daysGrid.innerHTML = html;
-
-            renderWordleGuessDistribution(stats.wordleGuessDistribution || {});
+                    </div>`;
+            }).join('');
+            return renderXwStats(x) + `
+                <div>
+                    <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">Average Time by Day</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">${days}</div>
+                </div>`;
         }
 
-        function renderWordleGuessDistribution(dist) {
-            const container = document.getElementById('wordle-guess-distribution');
-            const counts = [1, 2, 3, 4, 5, 6].map(n => dist[String(n)] || 0);
-            const maxCount = Math.max(1, ...counts);
-            const totalCount = counts.reduce((a, b) => a + b, 0);
+        function setStatBody(id, html) {
+            const el = document.getElementById(`stat-body-${id}`);
+            if (el) el.innerHTML = html;
+        }
 
-            if (totalCount === 0) {
-                container.innerHTML = '<p class="text-xs text-slate-400 dark:text-neutral-500">No solved Wordles yet.</p>';
-                return;
-            }
-
-            let html = '';
-            counts.forEach((count, i) => {
-                const n = i + 1;
-                const pct = Math.round((count / maxCount) * 100);
-                html += `
-                    <div class="flex items-center gap-2">
-                        <span class="w-4 text-xs font-bold text-slate-500 dark:text-neutral-400">${n}</span>
-                        <div class="flex-1 h-5 bg-slate-100 dark:bg-neutral-900 rounded-md overflow-hidden">
-                            <div class="h-full bg-purple-400 dark:bg-purple-600 rounded-md transition-all" style="width: ${count > 0 ? Math.max(pct, 6) : 0}%;"></div>
-                        </div>
-                        <span class="w-5 text-xs font-semibold text-slate-500 dark:text-neutral-400 text-right">${count}</span>
-                    </div>
-                `;
-            });
-            container.innerHTML = html;
+        async function loadUserStats() {
+            buildStatsAccordion();
+            const stats = await fetchJsonCached('/api/user/stats', 60000);
+            if (!stats) return;
+            setStatBody('wordle', renderWordleStats(stats.wordle));
+            setStatBody('bee', renderBeeStats(stats.bee));
+            setStatBody('mini', renderXwStats(stats.mini));
+            setStatBody('midi', renderXwStats(stats.midi));
+            setStatBody('normal', renderCrosswordStats(stats.normal));
         }
 
         async function logout() {

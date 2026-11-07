@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 from functools import lru_cache
-import os, gzip, json, sqlite3, time, hashlib, secrets
+import os, gzip, json, sqlite3, time, hashlib, secrets, math
 
 app = Flask(__name__, static_folder="/app/data/static", static_url_path="/static")
 
@@ -416,7 +416,7 @@ def _master_title(publisher, year, month, day_key):
     info = master[publisher][year][month][day_key]
     puz_data = get_data(*info, mode='gzip', header=get_header())
     title = get_puzzle_title(puz_data)
-    if len(_TITLE_CACHE) > 64:
+    if len(_TITLE_CACHE) > 512:
         _TITLE_CACHE.clear()
     _TITLE_CACHE[key] = title
     return title
@@ -876,6 +876,35 @@ def get_friends_leaderboard():
 
 
 # User Solve Time Statistics Endpoint
+BEE_RANKS = [("Beginner", 0.00), ("Good Start", 0.02), ("Moving Up", 0.05), ("Good", 0.08),
+             ("Solid", 0.15), ("Nice", 0.25), ("Great", 0.40), ("Amazing", 0.50),
+             ("Genius", 0.70), ("Queen Bee", 1.00)]
+
+
+def _bee_rank_index(score, max_points=None, ratio=None):
+    # Same rule as the game page: a rank starts at round(pct * max_points) points.
+    idx = 0
+    for i, (_, pct) in enumerate(BEE_RANKS):
+        if max_points:
+            reached = score >= math.floor(pct * max_points + 0.5)
+        else:
+            reached = (ratio or 0) >= pct - 1e-9
+        if reached:
+            idx = i
+    return idx
+
+
+def _pct(part, whole):
+    return round(part * 100 / whole) if whole else None
+
+
+def _avg(arr, digits=0):
+    if not arr:
+        return None
+    v = sum(arr) / len(arr)
+    return round(v, digits) if digits else int(round(v))
+
+
 @app.route('/api/user/stats')
 def get_user_stats():
     if 'user_id' not in session:
@@ -883,91 +912,131 @@ def get_user_stats():
 
     user_id = session['user_id']
     with db() as conn:
-        rows = conn.execute('''
-            SELECT publisher, year, month, day_key, timer_seconds, used_check
-            FROM progress
-            WHERE user_id = ? AND completed = 1
-        ''', (user_id,)).fetchall()
+        # Only Spelling Bee rows need their saved grid (the found words).
+        rows = conn.execute(
+            "SELECT publisher, year, month, day_key, timer_seconds, ratio, completed, used_check, "
+            "CASE WHEN publisher = ? THEN user_grid ELSE NULL END "
+            "FROM progress WHERE user_id = ?",
+            (SPELLING_BEE_PUBLISHER, user_id)
+        ).fetchall()
 
-    mini_times = []
-    midi_times = []
-    wordle_win_guesses = []   # number of guesses used, only for won games
-    wordle_guess_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
+    xw = {k: {'played': 0, 'solved': 0, 'times': []} for k in ('normal', 'midi', 'mini')}
+    by_day = {d: [] for d in ('Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                              'Friday', 'Saturday', 'Sunday')}
+
+    wordle_finished = 0
     wordle_wins = 0
-    wordle_total = 0
-    crossword_times = {
-        'Monday': [], 'Tuesday': [], 'Wednesday': [],
-        'Thursday': [], 'Friday': [], 'Saturday': [], 'Sunday': []
-    }
+    wordle_win_guesses = []
+    wordle_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
 
-    for row in rows:
-        publisher, year, month, day_key, secs, used_check = row
+    bee_played = 0
+    bee_words = 0
+    bee_pangrams = 0
+    bee_genius = 0
+    bee_queen = 0
+    bee_longest = ''
+    bee_rank_counts = [0] * len(BEE_RANKS)
 
+    for publisher, year, month, day_key, secs, ratio, completed, used_check, grid_json in rows:
         if publisher == WORDLE_PUBLISHER:
-            wordle_total += 1
-            if used_check:
-                wordle_wins += 1
-                # secs is repurposed for Wordle: number of guesses used to win
-                if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
-                    wordle_win_guesses.append(secs)
-                    wordle_guess_dist[str(secs)] += 1
+            # For Wordle: timer_seconds = guesses used, used_check = won.
+            if completed:
+                wordle_finished += 1
+                if used_check:
+                    wordle_wins += 1
+                    if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
+                        wordle_win_guesses.append(secs)
+                        wordle_dist[str(secs)] += 1
             continue
 
         if publisher == SPELLING_BEE_PUBLISHER:
-            continue  # timer_seconds holds the score for Spelling Bee
+            # For Spelling Bee: timer_seconds = score.
+            if not secs or secs <= 0:
+                continue
+            bee_played += 1
 
-        if secs is None or secs <= 0:
+            try:
+                puzzle = get_spelling_bee_puzzle(date(int(year), int(month), int(day_key)))
+            except Exception:
+                puzzle = None
+            max_points = puzzle.get('max_points') if puzzle else None
+            idx = _bee_rank_index(secs, max_points, ratio)
+            bee_rank_counts[idx] += 1
+            if idx >= 8:
+                bee_genius += 1
+            if idx == len(BEE_RANKS) - 1:
+                bee_queen += 1
+
+            letters = ({str(puzzle.get('center_letter', '')).upper()} |
+                       {str(l).upper() for l in puzzle.get('outer_letters', [])}) if puzzle else set()
+            letters.discard('')
+            try:
+                grid = json.loads(grid_json) if grid_json else {}
+            except ValueError:
+                grid = {}
+            words = grid.get('foundWords', []) if isinstance(grid, dict) else []
+            for w in words:
+                w = str(w).upper()
+                bee_words += 1
+                if letters and letters.issubset(set(w)):
+                    bee_pangrams += 1
+                if len(w) > len(bee_longest):
+                    bee_longest = w
             continue
 
+        # Crosswords (NY Times daily / midi / mini)
         if day_key.endswith('-mini'):
-            mini_times.append(secs)
+            kind = 'mini'
         elif day_key.endswith('-midi'):
-            midi_times.append(secs)
+            kind = 'midi'
         else:
-            try:
-                day_num = int(day_key)
-                dt = datetime(int(year), int(month), day_num)
-                day_name = dt.strftime('%A')
-                if day_name in crossword_times:
-                    crossword_times[day_name].append(secs)
-            except Exception:
-                pass
+            kind = 'normal'
+        bucket = xw[kind]
+        if completed or (ratio or 0) > 0:
+            bucket['played'] += 1
+        if completed:
+            bucket['solved'] += 1
+            if secs and secs > 0:
+                bucket['times'].append(secs)
+                if kind == 'normal':
+                    try:
+                        day_name = datetime(int(year), int(month), int(day_key)).strftime('%A')
+                        by_day[day_name].append(secs)
+                    except (ValueError, KeyError):
+                        pass
 
-    # Spelling Bee: "completed" only means Queen Bee, so it needs its own query
-    # that counts every day the user actually scored on.
-    with db() as conn:
-        bee_rows = conn.execute('''
-            SELECT ratio, timer_seconds, completed
-            FROM progress
-            WHERE user_id = ? AND publisher = ? AND timer_seconds > 0
-        ''', (user_id, SPELLING_BEE_PUBLISHER)).fetchall()
-    bee_scores = [r[1] for r in bee_rows]
-    bee_queen = sum(1 for r in bee_rows if r[2] or (r[0] or 0) >= 1.0)
-    bee_genius = sum(1 for r in bee_rows if r[2] or (r[0] or 0) >= BEE_GENIUS_RATIO - 1e-9)  # Genius or better
+    def xw_summary(b):
+        return {
+            'played': b['played'],
+            'solved': b['solved'],
+            'solveRate': _pct(b['solved'], b['played']),
+            'avgTime': _avg(b['times']),
+        }
 
-    def calc_avg(arr):
-        return round(sum(arr) / len(arr)) if arr else None
-
-    def calc_avg_float(arr):
-        return round(sum(arr) / len(arr), 1) if arr else None
+    crossword = xw_summary(xw['normal'])
+    crossword['byDay'] = {d: {'avg': _avg(t), 'count': len(t)} for d, t in by_day.items()}
 
     return jsonify({
-        'miniAvg': calc_avg(mini_times),
-        'miniCount': len(mini_times),
-        'midiAvg': calc_avg(midi_times),
-        'midiCount': len(midi_times),
-        'wordleAvg': calc_avg_float(wordle_win_guesses),  # average guesses per win
-        'wordleCount': wordle_total,
-        'wordleWinRate': round((wordle_wins / wordle_total) * 100) if wordle_total else None,
-        'wordleGuessDistribution': wordle_guess_dist,      # {"1": count, ..., "6": count}, wins only
-        'beeCount': len(bee_scores),
-        'beeAvgScore': calc_avg(bee_scores),
-        'beeGeniusCount': bee_genius,                      # Genius or better
-        'beeQueenCount': bee_queen,
-        'crosswordByDay': {
-            day: {'avg': calc_avg(times), 'count': len(times)}
-            for day, times in crossword_times.items()
-        }
+        'wordle': {
+            'played': wordle_finished,
+            'wins': wordle_wins,
+            'winRate': _pct(wordle_wins, wordle_finished),
+            'avgGuesses': _avg(wordle_win_guesses, 1),
+            'distribution': wordle_dist,
+        },
+        'bee': {
+            'played': bee_played,
+            'genius': bee_genius,
+            'queen': bee_queen,
+            'totalWords': bee_words,
+            'pangrams': bee_pangrams,
+            'longestWord': bee_longest or None,
+            'rankDistribution': [{'name': BEE_RANKS[i][0], 'count': bee_rank_counts[i]}
+                                 for i in range(len(BEE_RANKS))],
+        },
+        'mini': xw_summary(xw['mini']),
+        'midi': xw_summary(xw['midi']),
+        'normal': crossword,
     })
 
 
@@ -1329,7 +1398,9 @@ def index():
             today_titles[p_type] = "Guess your way to the correct word."
             continue
         if p_type == 'spelling-bee':
-            today_available[p_type] = get_spelling_bee_puzzle(today_date) is not None
+            today_available[p_type] = os.path.exists(os.path.join(
+                SPELLING_BEE_DIR, str(today_date.year),
+                f"{today_date.month:02d}", f"{today_date.day:02d}.json"))
             today_titles[p_type] = "Make as many words as you can with 7 letters."
             continue
 
@@ -1506,6 +1577,18 @@ def get_puzzle_json(publisher, year, month, day_key):
     if immutable:
         resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp
+
+
+def _warm_caches():
+    # Load the big master index / word list at startup instead of on the first request.
+    for fn in (get_master_index, get_valid_wordle_words_text):
+        try:
+            fn()
+        except Exception:
+            pass
+
+
+_warm_caches()
 
 
 if __name__ == '__main__':

@@ -314,7 +314,7 @@ def scrape_one(session, puzzle_type, target_date, output_dir, force=False):
 
     try:
         raw = get_puzzle(session, url)
-        fallback_title = f"NY Times {puzzle_type.title()} - {target_date.isoformat()}"
+        fallback_title = f"The {target_date.strftime('%A')} {puzzle_type.title()}"
         data = convert_to_app_json(raw, fallback_title)
     except Exception as e:
         print(f"  [fail] {puzzle_type:5s} {target_date} - {e}")

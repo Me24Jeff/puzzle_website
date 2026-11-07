@@ -1,0 +1,15 @@
+<style>
+    /* Pin the page to the viewport so rotating the phone can never leave the
+       document scrolled / shifted up. */
+    body { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; overflow: hidden; }
+</style>
+<script>
+    (function () {
+        function reset() { window.scrollTo(0, 0); }
+        function resetSoon() { reset(); setTimeout(reset, 100); setTimeout(reset, 350); }
+        window.addEventListener('orientationchange', resetSoon);
+        window.addEventListener('resize', resetSoon);
+        window.addEventListener('pageshow', resetSoon);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', resetSoon);
+    })();
+</script>
