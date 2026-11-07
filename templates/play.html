@@ -21,9 +21,7 @@
     <title>{{ publisher }} &middot; {{ year }}-{{ month }}-{{ day_key }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'media'
-        }
+        tailwind.config = { darkMode: 'media' }
     </script>
     <style>
         html, body {
@@ -34,74 +32,60 @@
             touch-action: manipulation;
         }
         body { background: #f1f5f9; }
-        @media (prefers-color-scheme: dark) {
-            body { background: #1c1c1e; }
-        }
+        @media (prefers-color-scheme: dark) { body { background: #1c1c1e; } }
 
-        #page {
-            height: 100vh;
-            height: 100dvh;
-        }
+        #page { height: 100vh; height: 100dvh; }
 
+        /* ---------- Grid area ----------
+           The grid is always sized in whole pixels. At zoom 1 it is guaranteed
+           to fit inside the wrapper (so nothing can scroll or shift); zooming in
+           makes it larger than the wrapper and the wrapper scrolls. */
         #grid-wrapper {
-            touch-action: pan-x pan-y;
-            display: flex;
             overflow: auto;
-            will-change: scroll-position;
-            scrollbar-width: none; /* Firefox */
-            -ms-overflow-style: none; /* IE / Edge */
+            touch-action: pan-x pan-y;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
         }
-
-        /* Hide scrollbars in Chrome, Safari, and Edge */
-        #grid-wrapper::-webkit-scrollbar {
-            display: none;
-        }
+        #grid-wrapper::-webkit-scrollbar { display: none; }
 
         #grid-container {
-            margin: auto;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-width: min-content;
-            min-height: min-content;
-            padding: 1rem;
+            display: grid;
+            place-items: center;
+            width: max-content;
+            height: max-content;
+            min-width: 100%;
+            min-height: 100%;
+            padding: 16px;
+            box-sizing: border-box;
         }
 
         #grid {
             display: grid;
-            border-top: 2px solid #111;
-            border-left: 2px solid #111;
-            border-right: 1px solid #111;
-            border-bottom: 1px solid #111;
+            gap: 1px;
+            padding: 2px;
             background: #111;
-            gap: 0;
-            container-type: inline-size;
-            box-sizing: border-box;
-            will-change: width, height;
+            box-sizing: content-box;
         }
+
         .cw-cell {
             position: relative;
             background: white;
-            aspect-ratio: 1;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: 600;
-            font-size: calc(60cqw / var(--cw-cols, 15));
+            font-size: calc(var(--cell, 30px) * 0.6);
             color: #111;
             cursor: pointer;
             user-select: none;
             overflow: hidden;
-            box-sizing: border-box;
-            border-right: 1px solid #111;
-            border-bottom: 1px solid #111;
         }
-        .cw-cell.block { background: #111; cursor: default; border-color: #111; }
+        .cw-cell.block { background: #111; cursor: default; }
         .cw-cell.in-word { background: #a9d8f5; }
         .cw-cell.current { background: #fbd94a; }
         .cw-cell .num {
             position: absolute; top: 1px; left: 2px;
-            font-size: 0.32em; font-weight: 600; color: #333;
+            font-size: calc(var(--cell, 30px) * 0.3); font-weight: 600; color: #333;
             line-height: 1;
         }
         .cw-cell .circle {
@@ -110,15 +94,9 @@
             pointer-events: none;
         }
         .cw-cell .letter {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-            line-height: 1;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+            width: 100%; height: 100%;
+            line-height: 1; text-align: center; white-space: nowrap; overflow: hidden;
         }
         .cw-cell.pencil-letter .letter { color: #9ca3af; }
         .cw-cell.correct-letter .letter { color: #2563eb; }
@@ -130,28 +108,39 @@
             pointer-events: none;
         }
 
-        @media (prefers-color-scheme: dark) {
-            .cw-cell { background: #2b2b2e; color: #f1f5f9; }
-            .cw-cell.in-word { background: #6C8A9E; }
-            .cw-cell.current { background: #C9AC36; }
-            .cw-cell .num { color: #9ca3af; }
-            .cw-cell .circle { border-color: #9ca3af; }
-            .cw-cell.wrong-letter .letter { color: #f1f5f9; }
-            .cw-cell.pencil-letter .letter { color: #71717a; }
-            #clue-bar { background: #6C8A9E !important; }
-            #clue-bar, #clue-bar #clue-text, #clue-bar > div { color: #f1f5f9 !important; }
+        /* ---------- Clue bar (fixed height; text shrinks to fit) ---------- */
+        #clue-bar {
+            height: 76px;
+            background: #a9d8f5;
+            color: #0f172a;
+        }
+        #clue-box {
+            flex: 1;
+            align-self: stretch;
+            min-width: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+        #clue-text {
+            width: 100%;
+            font-weight: 600;
+            line-height: 1.25;
+            text-align: left;
+            padding: 0 4px;
         }
 
+        /* ---------- Keyboard ---------- */
+        #keyboard { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem); }
         .kb-key {
             flex: 1 1 0;
-            padding: 12px 0;
-            margin: 2px;
-            border-radius: 6px;
+            height: 54px;
+            margin: 3px 2px;
+            border-radius: 7px;
             background: white;
             box-shadow: 0 1px 2px rgba(0,0,0,0.15);
-            text-align: center;
             font-weight: 600;
-            font-size: 16px;
+            font-size: 18px;
             user-select: none;
             cursor: pointer;
             display: flex;
@@ -163,11 +152,19 @@
         .kb-key:active { background: #cbd5e1; }
         .kb-key.func-key { background: #cbd5e1; color: #0f172a; }
         .kb-key.active-toggle { background: #111; color: white; }
-        /* !important: on touch screens the button keeps :hover after a tap, and Tailwind's
-           hover:bg-* would otherwise win over this until you tap somewhere else. */
+        /* !important: on touch screens the button keeps :hover after a tap */
         .toolbtn.active { background: #111 !important; color: white !important; }
 
         @media (prefers-color-scheme: dark) {
+            .cw-cell { background: #2b2b2e; color: #f1f5f9; }
+            .cw-cell.block { background: #111; }
+            .cw-cell.in-word { background: #6C8A9E; }
+            .cw-cell.current { background: #C9AC36; }
+            .cw-cell .num { color: #9ca3af; }
+            .cw-cell .circle { border-color: #9ca3af; }
+            .cw-cell.wrong-letter .letter { color: #f1f5f9; }
+            .cw-cell.pencil-letter .letter { color: #71717a; }
+            #clue-bar { background: #6C8A9E; color: #f1f5f9; }
             #keyboard { background: #262626; }
             .kb-key { background: #3f3f46; color: #f1f5f9; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
             .kb-key:active { background: #52525b; }
@@ -227,7 +224,7 @@
 
     <!-- Victory Modal -->
     <div id="victory-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl transform transition-all border border-slate-100 dark:border-neutral-700">
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl border border-slate-100 dark:border-neutral-700">
             <div class="text-5xl mb-3">🎉</div>
             <h2 class="text-2xl font-black text-slate-900 dark:text-white mb-1">Congrats!</h2>
             <p class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">You finished the puzzle!</p>
@@ -250,9 +247,8 @@
 
         <!-- Header -->
         <header class="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-neutral-700 shrink-0"
-                 style="padding-top: max(0.5rem, env(safe-area-inset-top));">
-            <button onclick="goBack()"
-                    aria-label="Back"
+                style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+            <button onclick="goBack()" aria-label="Back"
                     class="text-slate-700 dark:text-neutral-300 hover:text-black dark:hover:text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-neutral-800 transition">
                 &#8249;
             </button>
@@ -260,12 +256,11 @@
                 <p id="puzzle-title" class="font-semibold text-slate-900 dark:text-white truncate text-sm">Loading&hellip;</p>
             </div>
 
-            <!-- Timer Display -->
             <div id="timer-display" class="font-mono font-bold text-sm text-slate-700 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800 px-2.5 py-1 rounded-md border border-slate-200 dark:border-neutral-700 select-none">
                 00:00
             </div>
 
-            <span id="rebus-badge" class="hidden px-2 h-8 rounded-full bg-purple-600 text-white text-xs font-semibold items-center justify-center">REBUS</span>
+            <span id="rebus-badge" style="display:none" class="px-2 h-8 rounded-full bg-purple-600 text-white text-xs font-semibold items-center justify-center">REBUS</span>
 
             <button id="kb-toggle-btn" onclick="toggleKeyboardVisibility()"
                     class="toolbtn w-9 h-9 rounded-full flex items-center justify-center text-base border border-slate-300 dark:border-neutral-700 hover:bg-slate-100 dark:hover:bg-neutral-800 transition"
@@ -278,17 +273,16 @@
                     title="Auto-check">CHECK</button>
         </header>
 
-        <!-- Main Body Area -->
+        <!-- Main body -->
         <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-            <!-- Grid Wrapper -->
-            <main id="grid-wrapper" class="relative flex-1 min-h-0 overflow-auto">
-                <div id="grid-container" class="min-w-full min-h-full flex items-center justify-center p-4 m-auto">
+            <main id="grid-wrapper" class="relative flex-1 min-h-0">
+                <div id="grid-container">
                     <p id="status" class="text-sm text-slate-500 dark:text-neutral-400 text-center">Loading puzzle&hellip;</p>
                     <div id="grid" class="hidden"></div>
                 </div>
             </main>
 
-            <!-- Desktop Clues Sidebar -->
+            <!-- Desktop clues sidebar -->
             <aside id="desktop-clues" class="hidden lg:flex flex-row w-[560px] border-l border-slate-200 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-900 overflow-hidden shrink-0">
                 <div class="flex-1 flex flex-col min-h-0 border-r border-slate-200 dark:border-neutral-700">
                     <h3 class="font-bold text-xs text-slate-500 dark:text-neutral-400 uppercase tracking-wider px-3 py-2 bg-slate-100 dark:bg-neutral-800 border-b border-slate-200 dark:border-neutral-700">Across</h3>
@@ -302,1034 +296,1021 @@
         </div>
 
         <!-- Clue bar + keyboard -->
-        <footer class="shrink-0 border-t border-slate-200">
-            <div id="clue-bar"
-                 onclick="toggleDirection()"
-                 class="flex items-center gap-2 bg-[#a9d8f5] px-2 py-2 min-h-[52px] cursor-pointer select-none">
-                <div onclick="event.stopPropagation(); gotoAdjacentClue(-1)"
-                     class="text-2xl leading-none text-slate-800 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full active:bg-black/10">
-                    &#8249;
+        <footer class="shrink-0 border-t border-slate-200 dark:border-neutral-700">
+            <div id="clue-bar" class="flex items-stretch select-none">
+                <div onclick="gotoAdjacentClue(-1)"
+                     class="w-16 shrink-0 text-4xl leading-none flex items-center justify-center cursor-pointer active:bg-black/15"
+                     aria-label="Previous clue">&#8249;</div>
+                <div id="clue-box" onclick="toggleDirection()" class="cursor-pointer">
+                    <p id="clue-text">&nbsp;</p>
                 </div>
-                <!-- Left-aligned clue text without 1a / 1d headers -->
-                <p id="clue-text" class="flex-1 text-sm sm:text-base font-semibold text-slate-900 text-left line-clamp-2 leading-snug px-1">
-                    &nbsp;
-                </p>
-                <div onclick="event.stopPropagation(); gotoAdjacentClue(1)"
-                     class="text-2xl leading-none text-slate-800 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full active:bg-black/10">
-                    &#8250;
-                </div>
+                <div onclick="gotoAdjacentClue(1)"
+                     class="w-16 shrink-0 text-4xl leading-none flex items-center justify-center cursor-pointer active:bg-black/15"
+                     aria-label="Next clue">&#8250;</div>
             </div>
 
-            <div id="keyboard" class="bg-slate-200 dark:bg-neutral-800 px-1 pt-1.5"
-                style="padding-bottom: 4.5rem;"></div>
+            <div id="keyboard" class="bg-slate-200 dark:bg-neutral-800 px-1 pt-1.5"></div>
         </footer>
     </div>
 
     <script id="puzzle-meta" type="application/json">
         {{ {"publisher": publisher, "year": year, "month": month, "day_key": day_key} | tojson }}
     </script>
-
     <script id="boot-data" type="application/json">
         {{ boot | tojson }}
     </script>
 
     <script>
-        // If we arrived here from the archive (via a `back` link), return
-        // to that same archive page/month instead of always going home.
-        function goBack() {
-            const params = new URLSearchParams(window.location.search);
-            const back = params.get('back');
-            window.location.href = back ? decodeURIComponent(back) : '/';
+    // =====================================================================
+    //  Setup / state
+    // =====================================================================
+    function goBack() {
+        stopVictorySound();
+        const back = new URLSearchParams(window.location.search).get('back');
+        window.location.href = back ? decodeURIComponent(back) : '/';
+    }
+
+    const meta = JSON.parse(document.getElementById('puzzle-meta').textContent);
+
+    let puzzle = null;
+    let lists = { across: [], down: [] };     // clues per direction, in number order
+    let acrossMap = {}, downMap = {};          // "x,y" -> clue
+    let numberMap = {};
+    let cellEls = [];                          // cellEls[row][col] -> DOM node
+
+    // userGrid[row][col] is null or { letter, pencil, verified }
+    let userGrid = [];
+    let curRow = 0, curCol = 0;
+    let direction = 'across';
+    let pencilMode = false;
+    let autoCheck = false;
+    let rebusMode = false;
+    let keyboardMode = 'abc';
+    let keyboardVisible = true;
+
+    let timerSeconds = 0;
+    let timerInterval = null;
+    let puzzleFinished = false;
+    let usedCheck = false;
+    let currentRatio = 0;
+
+    const MIN_ZOOM = 1, MAX_ZOOM = 3;
+    let zoom = 1;
+    let popoverTimeout = null;
+
+    const OTHER = d => (d === 'across' ? 'down' : 'across');
+    const cellKey = (col, row) => `${col},${row}`;
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    // =====================================================================
+    //  Victory sound: fetched + decoded up front so it plays instantly.
+    //  (An <audio> element streams with Range requests, which the service
+    //  worker doesn't cache, so it was re-downloaded when you finished.)
+    // =====================================================================
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null, victoryBuffer = null, victoryFallback = null;
+
+    function ensureAudioCtx() {
+        if (!audioCtx && AudioCtor) {
+            try { audioCtx = new AudioCtor({ latencyHint: 'interactive' }); } catch (e) { audioCtx = null; }
         }
+        return audioCtx;
+    }
 
-        const meta = JSON.parse(document.getElementById('puzzle-meta').textContent);
+    // First tap/keypress anywhere on the page: start the audio context and push a
+    // silent blip through it, so the output hardware is already awake (and the
+    // context unlocked) long before the puzzle is finished.
+    let audioWarmed = false;
+    function warmAudio(ctx) {
+        if (audioWarmed || ctx.state !== 'running') return;
+        audioWarmed = true;
+        try {
+            const src = ctx.createBufferSource();
+            src.buffer = ctx.createBuffer(1, 1, 22050);
+            src.connect(ctx.destination);
+            src.start(0);
+        } catch (e) {}
+    }
+    function unlockAudio() {
+        const ctx = ensureAudioCtx();
+        if (!ctx) return;
+        if (ctx.state === 'suspended') ctx.resume().then(() => warmAudio(ctx)).catch(() => {});
+        else warmAudio(ctx);
+    }
+    // Capture phase, so the context is already unlocked before any key handler runs.
+    document.addEventListener('pointerdown', unlockAudio, true);
+    document.addEventListener('keydown', unlockAudio, true);
 
-        let puzzle = null;
-        let userGrid = [];
-        let acrossMap = {};
-        let downMap = {};
-        let numberMap = {};
-        let curRow = 0, curCol = 0;
-        let direction = 'across';
-        let pencilMode = false;
-        let autoCheck = false;
-        let rebusMode = false;
-        let keyboardMode = 'abc';
-        let keyboardVisible = true;
+    let victoryOffset = 0;        // seconds of leading silence in the file, skipped on play
+    let victorySource = null;     // the currently playing node, so it can be stopped
+    let victoryPlayToken = 0;
 
-        let timerSeconds = 0;
-        let timerInterval = null;
-        let puzzleFinished = false;
-        let milestonesReached = { 25: false, 50: false, 75: false };
-        let usedCheck = false;
-        let currentRatio = 0.0;
-
-        const MIN_ZOOM = 1, MAX_ZOOM = 3;
-        let zoom = 1;
-        let pinchState = null;
-        let zoomFrame = null;
-        let popoverTimeout = null;
-
-        function cellKey(col, row) { return `${col},${row}`; }
-        function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
-
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                if (!puzzleFinished) {
-                    timerSeconds++;
-                    updateTimerDisplay();
-                    // Edits are saved as they happen (see markDirty); this only
-                    // covers time passing while nothing is being typed.
-                    if (timerSeconds % 60 === 0) {
-                        flushSave();
-                    }
-                }
-            }, 1000);
-        }
-
-        function stopTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
+    function findLeadingSilence(buf) {
+        const threshold = 0.01;
+        let first = buf.length;
+        for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+            const d = buf.getChannelData(ch);
+            for (let i = 0; i < d.length && i < first; i++) {
+                if (Math.abs(d[i]) > threshold) { first = i; break; }
             }
         }
+        if (first >= buf.length) return 0;
+        return clamp(first / buf.sampleRate - 0.02, 0, 3);
+    }
 
-        // ---- Saving -------------------------------------------------------
-        // Progress used to be POSTed on every keystroke AND every 5 seconds.
-        // Now: edits are batched (at most one save per SAVE_DELAY_MS while
-        // typing), the clock is saved once a minute, and anything pending is
-        // flushed when the tab is hidden/closed. Completion saves immediately.
-        const SAVE_DELAY_MS = 3000;
-        let dirty = false;
-        let saveTimer = null;
-        let lastSavedSeconds = -1;
-        let hasSavedRow = false;   // a progress row already exists on the server
-
-        function markDirty() {
-            if (!puzzle) return;
-            dirty = true;
-            if (!saveTimer) saveTimer = setTimeout(() => flushSave(), SAVE_DELAY_MS);
-        }
-
-        function timerNeedsSave() {
-            return !puzzleFinished && (currentRatio > 0 || hasSavedRow) && timerSeconds !== lastSavedSeconds;
-        }
-
-        function flushSave(keepalive) {
-            if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-            if (!puzzle) return;
-            if (!dirty && !timerNeedsSave()) return;
-
-            dirty = false;
-            lastSavedSeconds = timerSeconds;
-            hasSavedRow = true;
-
-            const saveUrl = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
-            fetch(saveUrl, {
-                method: 'POST',
-                keepalive: !!keepalive,   // lets the request finish while the page unloads
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    userGrid: userGrid,
-                    timerSeconds: timerSeconds,
-                    ratio: currentRatio,
-                    completed: puzzleFinished,
-                    usedCheck: usedCheck
-                })
-            }).then(r => {
-                if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
-            }).catch(e => {
-                dirty = true;   // try again next time
-                console.error("Error saving progress:", e);
+    function preloadVictorySound() {
+        fetch('/static/victory.mp3')
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+            .then(buf => new Promise((resolve, reject) => {
+                const ctx = ensureAudioCtx();
+                if (!ctx) return reject(new Error('no WebAudio'));
+                ctx.decodeAudioData(buf, resolve, reject);
+            }))
+            .then(b => { victoryBuffer = b; victoryOffset = findLeadingSilence(b); })
+            .catch(() => {
+                victoryFallback = new Audio('/static/victory.mp3');
+                victoryFallback.preload = 'auto';
+                victoryFallback.load();
             });
+    }
+
+    function stopVictorySound() {
+        victoryPlayToken++;   // cancels a play that is still waiting for the context to resume
+        if (victorySource) {
+            try { victorySource.stop(); } catch (e) {}
+            victorySource = null;
         }
+        if (victoryFallback) {
+            try { victoryFallback.pause(); victoryFallback.currentTime = 0; } catch (e) {}
+        }
+    }
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') flushSave(true);
-        });
-        window.addEventListener('pagehide', () => flushSave(true));
-
-        function formatTime(totalSecs) {
-            const m = Math.floor(totalSecs / 60);
-            const s = totalSecs % 60;
-            const h = Math.floor(m / 60);
-            const rm = m % 60;
-            if (h > 0) {
-                return `${h}:${rm.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    function playVictorySound() {
+        stopVictorySound();
+        const token = victoryPlayToken;
+        try {
+            if (victoryBuffer && audioCtx) {
+                const start = () => {
+                    if (token !== victoryPlayToken) return;
+                    const src = audioCtx.createBufferSource();
+                    src.buffer = victoryBuffer;
+                    src.connect(audioCtx.destination);
+                    src.onended = () => { if (victorySource === src) victorySource = null; };
+                    victorySource = src;
+                    src.start(0, victoryOffset);
+                };
+                if (audioCtx.state === 'running') start();
+                else audioCtx.resume().then(start).catch(() => {});
+            } else {
+                if (!victoryFallback) victoryFallback = new Audio('/static/victory.mp3');
+                victoryFallback.currentTime = 0;
+                victoryFallback.play().catch(() => {});
             }
-            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-        }
+        } catch (e) { /* sound is optional */ }
+    }
 
-        function updateTimerDisplay() {
-            const timerEl = document.getElementById('timer-display');
-            if (timerEl) timerEl.textContent = formatTime(timerSeconds);
-        }
+    // Never let the sound outlive this page (it used to carry on into the next puzzle).
+    window.addEventListener('pagehide', () => {
+        stopVictorySound();
+        if (audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(() => {});
+    });
 
-        function showToast(message) {
-            const container = document.getElementById('toast-container');
-            if (!container) return;
-            const toast = document.createElement('div');
-            toast.className = 'toast';
-            toast.textContent = message;
-            container.appendChild(toast);
-            setTimeout(() => { toast.remove(); }, 2500);
-        }
+    // =====================================================================
+    //  Timer + saving
+    // =====================================================================
+    function formatTime(totalSecs) {
+        const m = Math.floor(totalSecs / 60), s = totalSecs % 60, h = Math.floor(m / 60), rm = m % 60;
+        const p = n => n.toString().padStart(2, '0');
+        return h > 0 ? `${h}:${p(rm)}:${p(s)}` : `${p(m)}:${p(s)}`;
+    }
 
-        function checkProgressAndCompletion(persist = true) {
-            let filledCount = 0;
-            let totalCells = 0;
-            let isCorrect = true;
+    function updateTimerDisplay() {
+        document.getElementById('timer-display').textContent = formatTime(timerSeconds);
+    }
 
-            for (let y = 0; y < puzzle.height; y++) {
-                for (let x = 0; x < puzzle.width; x++) {
-                    const cell = puzzle.grid[y][x];
-                    if (!cell.block) {
-                        totalCells++;
-                        const userVal = userGrid[y][x];
-                        // Handle both object format ({ letter: 'A' }) and string format
-                        const userLetter = typeof userVal === 'string' ? userVal : (userVal ? userVal.letter : '');
-                        if (userLetter) {
-                            filledCount++;
-                            if (userLetter.toUpperCase() !== cell.solution.toUpperCase()) {
-                                isCorrect = false;
-                            }
-                        } else {
-                            isCorrect = false;
-                        }
-                    }
-                }
-            }
-
-            currentRatio = totalCells > 0 ? (filledCount / totalCells) : 0;
-
-            let justFinished = false;
-            if (isCorrect && !puzzleFinished) {
-                puzzleFinished = true;
-                justFinished = true;
-                stopTimer();
-
-                try {
-                    const victoryAudio = new Audio('/static/victory.mp3');
-                    victoryAudio.play().catch(err => {
-                        console.warn('Audio playback blocked by browser policy:', err);
-                    });
-                } catch (e) {
-                    console.error('Audio playback error:', e);
-                }
-
-                const completionTime = formatTime(timerSeconds);
-                showToast(`Puzzle Completed in ${completionTime}!`);
-
-                // Display Victory Modal
-                const modal = document.getElementById('victory-modal');
-                if (modal) {
-                    document.getElementById('modal-puzzle-title').textContent = puzzle.title || '';
-                    document.getElementById('modal-completion-time').textContent = completionTime;
-                    modal.classList.remove('hidden');
-                }
-            }
-
-            if (justFinished) {
-                dirty = true;
-                flushSave();          // leaderboard should see a finish right away
-            } else if (persist) {
-                markDirty();
-            }
-        }
-
-        function closeVictoryModal() {
-            document.getElementById('victory-modal').classList.add('hidden');
-        }
-
-        function isCellVerified(r, c) {
-            return userGrid[r] && userGrid[r][c] && userGrid[r][c].verified;
-        }
-
-        function verifyCell(r, c) {
-            if (!puzzle || !userGrid[r] || !userGrid[r][c]) return;
-            const solution = puzzle.grid[r][c].solution;
-            if (userGrid[r][c].letter && userGrid[r][c].letter.toUpperCase() === solution.toUpperCase()) {
-                userGrid[r][c].verified = true;
-            }
-        }
-
-        function initKeyboardVisibility() {
-            keyboardVisible = window.innerWidth < 1024;
-            updateKeyboardVisibility();
-        }
-
-        function toggleKeyboardVisibility() {
-            keyboardVisible = !keyboardVisible;
-            updateKeyboardVisibility();
-        }
-
-        function updateKeyboardVisibility() {
-            const kb = document.getElementById('keyboard');
-            if (keyboardVisible) kb.classList.remove('hidden');
-            else kb.classList.add('hidden');
-        }
-
-        function exitRebus() {
-            if (rebusMode) {
-                rebusMode = false;
-                document.getElementById('rebus-badge').classList.add('hidden');
-                buildKeyboard();
-            }
-        }
-
-        function toggleRebus() {
-            rebusMode = !rebusMode;
-            document.getElementById('rebus-badge').classList.toggle('hidden', !rebusMode);
-            if (rebusMode) keyboardMode = 'abc';
-            buildKeyboard();
-        }
-
-        function loadPuzzle() {
-            // The server embeds both the puzzle and this user's saved progress
-            // in the page, so there is nothing to fetch here.
-            let boot = null;
-            try { boot = JSON.parse(document.getElementById('boot-data').textContent); } catch (e) {}
-            if (!boot || boot.error || !boot.puzzle) {
-                document.getElementById('status').textContent =
-                    `Couldn't load this puzzle: ${(boot && boot.error) || 'unknown error'}`;
-                return;
-            }
-
-            puzzle = boot.puzzle;
-            const saved = boot.saved || {};
-            hasSavedRow = Object.keys(saved).length > 0;
-
-            document.getElementById('puzzle-title').textContent = puzzle.title || '';
-            document.title = puzzle.title || document.title;
-
-            userGrid = Array.from({length: puzzle.height}, () => Array(puzzle.width).fill(null));
-
-            puzzle.clues.across.forEach(c => c.cells.forEach(([x, y]) => acrossMap[cellKey(x, y)] = c));
-            puzzle.clues.down.forEach(c => c.cells.forEach(([x, y]) => downMap[cellKey(x, y)] = c));
-            puzzle.clues.across.concat(puzzle.clues.down).forEach(c => {
-                numberMap[cellKey(c.col, c.row)] = c.number;
-            });
-
-            if (Array.isArray(saved.userGrid) && saved.userGrid.length === puzzle.height) userGrid = saved.userGrid;
-            if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
-            if (saved.usedCheck) usedCheck = saved.usedCheck;
-            if (saved.completed) puzzleFinished = saved.completed;
-            lastSavedSeconds = timerSeconds;
-
-            // Recalculate grid ratio immediately on load (without re-saving)
-            checkProgressAndCompletion(false);
-
-            // Display stored elapsed time in header
+    function startTimer() {
+        stopTimer();
+        timerInterval = setInterval(() => {
+            if (puzzleFinished) return;
+            timerSeconds++;
             updateTimerDisplay();
+            if (timerSeconds % 60 === 0) flushSave();   // edits are saved as they happen
+        }, 1000);
+    }
 
-            outer:
-            for (let y = 0; y < puzzle.height; y++) {
-                for (let x = 0; x < puzzle.width; x++) {
-                    if (!puzzle.grid[y][x].block) {
-                        curRow = y; curCol = x;
-                        direction = acrossMap[cellKey(x, y)] ? 'across' : 'down';
-                        break outer;
-                    }
-                }
+    function stopTimer() {
+        if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    }
+
+    // Edits are batched (at most one save per SAVE_DELAY_MS), the clock is
+    // saved once a minute, pending data is flushed when the tab is hidden, and
+    // completion saves immediately.
+    const SAVE_DELAY_MS = 3000;
+    let dirty = false, saveTimer = null, lastSavedSeconds = -1, hasSavedRow = false;
+
+    function markDirty() {
+        if (!puzzle) return;
+        dirty = true;
+        if (!saveTimer) saveTimer = setTimeout(() => flushSave(), SAVE_DELAY_MS);
+    }
+
+    function timerNeedsSave() {
+        return !puzzleFinished && (currentRatio > 0 || hasSavedRow) && timerSeconds !== lastSavedSeconds;
+    }
+
+    function flushSave(keepalive) {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        if (!puzzle) return;
+        if (!dirty && !timerNeedsSave()) return;
+
+        dirty = false;
+        lastSavedSeconds = timerSeconds;
+        hasSavedRow = true;
+
+        const url = `/api/progress/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
+        fetch(url, {
+            method: 'POST',
+            keepalive: !!keepalive,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userGrid, timerSeconds, ratio: currentRatio,
+                completed: puzzleFinished, usedCheck
+            })
+        }).then(r => {
+            if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+        }).catch(e => { dirty = true; console.error('Error saving progress:', e); });
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushSave(true);
+    });
+    window.addEventListener('pagehide', () => flushSave(true));
+
+    // =====================================================================
+    //  Small UI helpers
+    // =====================================================================
+    function showToast(message) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 2500);
+    }
+
+    // Clue text: escaped, but italics/bold/sub/sup tags are allowed through.
+    function setClueHtml(el, text) {
+        const esc = String(text == null ? '' : text)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        el.innerHTML = esc.replace(/&lt;(\/?)(i|em|b|strong|sub|sup)&gt;/gi, '<$1$2>');
+    }
+
+    function closeVictoryModal() {
+        document.getElementById('victory-modal').classList.add('hidden');
+    }
+
+    // =====================================================================
+    //  Cell state helpers
+    // =====================================================================
+    const entryAt = (r, c) => (userGrid[r] && userGrid[r][c]) || null;
+    const hasLetter = (r, c) => { const e = entryAt(r, c); return !!(e && e.letter); };
+    const isVerified = (r, c) => { const e = entryAt(r, c); return !!(e && e.verified); };
+
+    function verifyCell(r, c) {
+        const e = entryAt(r, c);
+        if (!e || !e.letter) return;
+        if (e.letter.toUpperCase() === String(puzzle.grid[r][c].solution).toUpperCase()) e.verified = true;
+    }
+
+    // A cell is "done" (navigation skips it) when:
+    //   autocheck on  -> it holds the correct letter (verified)
+    //   autocheck off -> it holds any letter
+    const cellDone = (r, c) => (autoCheck ? isVerified(r, c) : hasLetter(r, c));
+
+    const getClue = (row, col, dir) => (dir === 'across' ? acrossMap : downMap)[cellKey(col, row)] || null;
+    const currentClue = () => getClue(curRow, curCol, direction);
+
+    // First cell ([x, y]) of a clue that still needs a letter, or null.
+    function firstOpenCell(clue) {
+        return clue.cells.find(([x, y]) => !cellDone(y, x)) || null;
+    }
+
+    function goTo(cell, dir) {
+        exitRebus();
+        curCol = cell[0];
+        curRow = cell[1];
+        if (dir) direction = dir;
+    }
+
+    // =====================================================================
+    //  Word traversal
+    // =====================================================================
+    // All words as ONE continuous stream: every across clue, then every down clue.
+    // Moving forward from the last across clue goes to the first down clue (and
+    // from the last down clue wraps to the first across clue) - the across
+    // clues are never circled back through before moving on.
+    function wordSequence() {
+        return [
+            ...lists.across.map(c => ({ dir: 'across', clue: c })),
+            ...lists.down.map(c => ({ dir: 'down', clue: c }))
+        ];
+    }
+
+    // The other words, in visiting order, starting right after the current one.
+    function candidateOrder(delta) {
+        const seq = wordSequence(), n = seq.length, step = delta >= 0 ? 1 : -1;
+        const cur = currentClue();
+        let i = seq.findIndex(s => s.dir === direction && s.clue === cur);
+        if (i < 0) i = 0;
+        const out = [];
+        for (let k = 1; k < n; k++) {
+            const s = seq[(((i + step * k) % n) + n) % n];
+            out.push([s.dir, s.clue]);
+        }
+        return out;
+    }
+
+    // The next place to go that still needs a letter: { dir, cell }, or null.
+    // With includeCurrent, the current word is the last resort (a gap behind the cursor).
+    function nextTarget(delta, includeCurrent) {
+        for (const [dir, clue] of candidateOrder(delta)) {
+            const cell = firstOpenCell(clue);
+            if (cell) return { dir, cell };
+        }
+        if (includeCurrent) {
+            const cur = currentClue();
+            const cell = cur && firstOpenCell(cur);
+            if (cell) return { dir: direction, cell };
+        }
+        return null;
+    }
+
+    // After a letter is typed: where does the cursor go?
+    //  Autocheck on:  next open (empty/wrong) cell later in the word; else the first
+    //                 open cell of the word (including the one just typed), so the
+    //                 cursor stays until the word is right; else the next word.
+    //  Autocheck off: simply the next cell in the word (filled or not); at the end
+    //                 of the word, the next word's first empty cell.
+    function advanceAfterTyping() {
+        const clue = currentClue();
+        if (!clue) return;
+        const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
+
+        if (autoCheck) {
+            for (let i = idx + 1; i < clue.cells.length; i++) {
+                const [x, y] = clue.cells[i];
+                if (!cellDone(y, x)) { goTo([x, y]); return; }
             }
+            for (let i = 0; i <= idx; i++) {
+                const [x, y] = clue.cells[i];
+                if (!cellDone(y, x)) { goTo([x, y]); return; }
+            }
+        } else if (idx >= 0 && idx < clue.cells.length - 1) {
+            goTo(clue.cells[idx + 1]);
+            return;
+        }
 
-            buildGridDom();
+        const t = nextTarget(1, true);
+        if (t) goTo(t.cell, t.dir);
+    }
+
+    // Arrow buttons / Tab: next (+1) or previous (-1) word that still has an open
+    // cell, landing on that cell. If everything is full, just the neighbouring word.
+    function gotoAdjacentClue(delta) {
+        if (!puzzle) return;
+        const t = nextTarget(delta, false);
+        if (t) {
+            goTo(t.cell, t.dir);
+        } else {
+            const order = candidateOrder(delta);
+            if (!order.length) return;
+            goTo(order[0][1].cells[0], order[0][0]);
+        }
+        render();
+    }
+
+    // Combined cyclic sequence (across..., down...) - used by backspace.
+    function adjacentInSequence(delta) {
+        const seq = [
+            ...lists.across.map(c => ({ dir: 'across', clue: c })),
+            ...lists.down.map(c => ({ dir: 'down', clue: c }))
+        ];
+        const cur = currentClue();
+        let i = seq.findIndex(s => s.dir === direction && s.clue === cur);
+        if (i < 0) i = 0;
+        return seq[((i + delta) % seq.length + seq.length) % seq.length];
+    }
+
+    function placeInitialCursor() {
+        direction = lists.across.length ? 'across' : 'down';
+        const first = lists[direction][0];
+        if (!first) return;
+        goTo(first.cells[0], direction);
+        const open = firstOpenCell(first);
+        if (open) { goTo(open); return; }
+        const t = nextTarget(1);
+        if (t) goTo(t.cell, t.dir);
+    }
+
+    // =====================================================================
+    //  Input
+    // =====================================================================
+    function exitRebus() {
+        if (rebusMode) {
+            rebusMode = false;
+            document.getElementById('rebus-badge').style.display = 'none';
             buildKeyboard();
-            buildDesktopCluesList();
-            initKeyboardVisibility();
-
-            // Start clock if active, or display final solve banner if completed
-            if (!puzzleFinished) {
-                startTimer();
-            } else {
-                showToast(`Puzzle Completed in ${formatTime(timerSeconds)}`);
-            }
-
-            document.getElementById('status').classList.add('hidden');
-            document.getElementById('grid').classList.remove('hidden');
-            applyZoomAtPoint(1);
-            render();
         }
+    }
 
-        function buildGridDom() {
-            const gridEl = document.getElementById('grid');
-            gridEl.style.gridTemplateColumns = `repeat(${puzzle.width}, 1fr)`;
-            gridEl.style.aspectRatio = `${puzzle.width} / ${puzzle.height}`;
-            gridEl.style.setProperty('--cw-cols', puzzle.width);
-            gridEl.innerHTML = '';
-            for (let y = 0; y < puzzle.height; y++) {
-                for (let x = 0; x < puzzle.width; x++) {
-                    const cellData = puzzle.grid[y][x];
-                    const div = document.createElement('div');
-                    div.dataset.row = y;
-                    div.dataset.col = x;
-                    div.className = 'cw-cell' + (cellData.block ? ' block' : '');
-                    if (!cellData.block) {
-                        const num = numberMap[cellKey(x, y)];
-                        if (num) {
-                            const numSpan = document.createElement('span');
-                            numSpan.className = 'num';
-                            numSpan.textContent = num;
-                            div.appendChild(numSpan);
-                        }
-                        if (cellData.circled) {
-                            const circle = document.createElement('span');
-                            circle.className = 'circle';
-                            div.appendChild(circle);
-                        }
-                        const letterSpan = document.createElement('span');
-                        letterSpan.className = 'letter';
-                        div.appendChild(letterSpan);
-                    }
-                    gridEl.appendChild(div);
-                }
-            }
-            gridEl.addEventListener('click', e => {
-                const cell = e.target.closest('.cw-cell');
-                if (cell && !cell.classList.contains('block')) {
-                    selectCell(+cell.dataset.row, +cell.dataset.col);
-                }
-            });
-        }
+    function toggleRebus() {
+        rebusMode = !rebusMode;
+        document.getElementById('rebus-badge').style.display = rebusMode ? 'flex' : 'none';
+        if (rebusMode) keyboardMode = 'abc';
+        buildKeyboard();
+    }
 
-        function buildDesktopCluesList() {
-            if (!puzzle) return;
-            const buildList = (type, containerId) => {
-                const container = document.getElementById(containerId);
-                container.innerHTML = '';
-                puzzle.clues[type].forEach(c => {
-                    const div = document.createElement('div');
-                    div.dataset.number = c.number;
-                    div.dataset.type = type;
-                    div.className = 'clue-item p-1.5 rounded cursor-pointer hover:bg-slate-200 dark:hover:bg-neutral-700 transition text-slate-800 dark:text-slate-200 flex gap-2';
-                    div.innerHTML = `<span class="font-bold min-w-[24px] text-right">${c.number}.</span><span class="flex-1">${c.text}</span>`;
-                    div.addEventListener('click', () => {
-                        direction = type;
-                        [curCol, curRow] = firstTargetCell(c);
-                        render();
-                    });
-                    container.appendChild(div);
-                });
-            };
+    function typeLetter(letter) {
+        if (!puzzle || puzzle.grid[curRow][curCol].block) return;
 
-            buildList('across', 'across-clues-list');
-            buildList('down', 'down-clues-list');
-        }
-
-        function updateDesktopCluesHighlight() {
-            const cur = currentClue();
-            document.querySelectorAll('.clue-item').forEach(el => {
-                const isCurrent = cur && +el.dataset.number === cur.number && el.dataset.type === direction;
-                if (isCurrent) {
-                    el.className = 'clue-item p-1.5 rounded cursor-pointer transition text-slate-900 font-semibold bg-[#a9d8f5] dark:bg-[#2c5a82] dark:text-white flex gap-2';
-                    // Scroll only the clue list itself (scrollIntoView can also scroll the page/grid).
-                    const list = el.parentElement;
-                    if (list && list.scrollHeight > list.clientHeight + 2) {
-                        const lr = list.getBoundingClientRect(), er = el.getBoundingClientRect();
-                        if (er.top < lr.top) list.scrollTo({ top: list.scrollTop + (er.top - lr.top) - 4, behavior: 'smooth' });
-                        else if (er.bottom > lr.bottom) list.scrollTo({ top: list.scrollTop + (er.bottom - lr.bottom) + 4, behavior: 'smooth' });
-                    }
-                } else {
-                    el.className = 'clue-item p-1.5 rounded cursor-pointer hover:bg-slate-200 dark:hover:bg-neutral-700 transition text-slate-800 dark:text-slate-200 flex gap-2';
-                }
-            });
-        }
-
-        function buildKeyboard() {
-            const rows = keyboardMode === 'abc'
-                ? [
-                    ['Q','W','E','R','T','Y','U','I','O','P'],
-                    ['A','S','D','F','G','H','J','K','L'],
-                    [{type: 'more'}, 'Z','X','C','V','B','N','M', {type: 'back'}],
-                  ]
-                : [
-                    ['1','2','3','4','5','6','7','8','9','0'],
-                    ['@','#','$','%','&','*','-', '!','+'],
-                    [{type: 'abc'}, "'", ',', '.', ':', '/', {type: 'rebus'}, {type: 'back'}],
-                  ];
-
-            const kb = document.getElementById('keyboard');
-            kb.innerHTML = '';
-            rows.forEach(rowKeys => {
-                const rowEl = document.createElement('div');
-                rowEl.className = 'flex';
-                rowKeys.forEach(k => rowEl.appendChild(buildKey(k)));
-                kb.appendChild(rowEl);
-            });
-        }
-
-        function buildKey(k) {
-            const keyEl = document.createElement('div');
-            if (typeof k === 'object') {
-                keyEl.className = 'kb-key func-key';
-                if (k.type === 'back') {
-                    keyEl.innerHTML = '<svg class="w-5 h-5 mx-auto pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-9.172a2 2 0 00-1.414.586L3 12z"/></svg>';
-                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); backspace(); });
-                } else if (k.type === 'more') {
-                    keyEl.textContent = 'more';
-                    keyEl.style.fontSize = '12px';
-                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); keyboardMode = 'more'; buildKeyboard(); });
-                } else if (k.type === 'abc') {
-                    keyEl.textContent = 'ABC';
-                    keyEl.style.fontSize = '12px';
-                    keyEl.addEventListener('pointerdown', (e) => { e.preventDefault(); keyboardMode = 'abc'; buildKeyboard(); });
-                } else if (k.type === 'rebus') {
-                    if (rebusMode) keyEl.classList.add('active-toggle');
-                    keyEl.style.fontSize = '12px';
-                    keyEl.textContent = rebusMode ? 'REBUS ON' : 'Rebus';
-                    keyEl.addEventListener('pointerdown', (e) => {
-                        e.preventDefault();
-                        toggleRebus();
-                    });
-                }
-            } else {
-                keyEl.className = 'kb-key';
-                keyEl.textContent = k;
-                keyEl.addEventListener('pointerdown', (e) => {
-                    e.preventDefault();
-                    showKeyPopup(keyEl, k);
-                    typeLetter(k);
-                });
-            }
-            return keyEl;
-        }
-
-        function showKeyPopup(keyEl, label) {
-            const popover = document.getElementById('key-popover');
-            const rect = keyEl.getBoundingClientRect();
-            popover.textContent = label;
-            popover.style.left = (rect.left + rect.width / 2) + 'px';
-            popover.style.top = rect.top + 'px';
-            popover.style.display = 'block';
-
-            if (popoverTimeout) clearTimeout(popoverTimeout);
-            popoverTimeout = setTimeout(() => { popover.style.display = 'none'; }, 120);
-        }
-
-        function getClue(row, col, dir) {
-            return (dir === 'across' ? acrossMap : downMap)[cellKey(col, row)] || null;
-        }
-
-        function currentClue() {
-            return getClue(curRow, curCol, direction);
-        }
-
-        function selectCell(row, col) {
-            if (row === curRow && col === curCol) {
-                toggleDirection();
-                return;
-            }
-            exitRebus();
-            const hasAcross = acrossMap[cellKey(col, row)];
-            const hasDown = downMap[cellKey(col, row)];
-            let dir = direction;
-            if (dir === 'across' && !hasAcross) dir = 'down';
-            if (dir === 'down' && !hasDown) dir = 'across';
-            curRow = row; curCol = col; direction = dir;
-            render();
-        }
-
-        function toggleDirection() {
-            const hasAcross = acrossMap[cellKey(curCol, curRow)];
-            const hasDown = downMap[cellKey(curCol, curRow)];
-            if (hasAcross && hasDown) {
-                direction = direction === 'across' ? 'down' : 'across';
-                render();
-            }
-        }
-
-        function hasLetter(row, col) {
-            const e = userGrid[row] && userGrid[row][col];
-            return !!(e && e.letter);
-        }
-
-        // A cell counts as "done" (skipped by navigation) when:
-        //  - autocheck on:  it is verified-correct
-        //  - autocheck off: it contains any letter
-        function isCellDone(row, col) {
-            return autoCheck ? isCellVerified(row, col) : hasLetter(row, col);
-        }
-
-        // Across clues followed by down clues, as one cyclic sequence.
-        function allClueSequence() {
-            return [
-                ...puzzle.clues.across.map(c => ({ clue: c, dir: 'across' })),
-                ...puzzle.clues.down.map(c => ({ clue: c, dir: 'down' }))
-            ];
-        }
-
-        // Jump to the next (delta=1) / previous (delta=-1) word that still has an empty cell,
-        // landing on its first empty cell. Completely filled words are skipped.
-        // If every word is full, falls back to plain next/previous word.
-        function gotoAdjacentClue(delta) {
-            exitRebus();
-            const seq = allClueSequence();
-            if (!seq.length) return;
-            const cur = currentClue();
-            let start = seq.findIndex(s => s.dir === direction && cur && s.clue.number === cur.number);
-            if (start < 0) start = 0;
-
-            const n = seq.length;
-            for (let step = 1; step <= n; step++) {
-                const entry = seq[((start + delta * step) % n + n) % n];
-                const empty = entry.clue.cells.find(([x, y]) => !isCellDone(y, x));
-                if (empty) {
-                    direction = entry.dir;
-                    [curCol, curRow] = empty;
-                    render();
-                    return;
-                }
-            }
-            // Everything is filled: plain neighbouring word, first cell.
-            const entry = seq[((start + delta) % n + n) % n];
-            direction = entry.dir;
-            [curCol, curRow] = entry.clue.cells[0];
-            render();
-        }
-
-        // Where the cursor lands when jumping to a specific word (clicking a clue):
-        // the first empty cell, or the first cell if the whole word is done.
-        function firstTargetCell(clue) {
-            for (const [x, y] of clue.cells) {
-                if (!isCellDone(y, x)) return [x, y];
-            }
-            return clue.cells[0];
-        }
-
-        function gotoPreviousWordEnd() {
-            exitRebus();
-            let list = puzzle.clues[direction];
-            const cur = currentClue();
-            let idx = cur ? list.findIndex(c => c.number === cur.number) : 0;
-            idx -= 1;
-
-            if (idx < 0) {
-                direction = direction === 'across' ? 'down' : 'across';
-                list = puzzle.clues[direction];
-                idx = list.length - 1;
-            }
-
-            const target = list[idx];
-            if (!target) return;
-
-            let targetCell = target.cells[target.cells.length - 1];
-            for (let i = target.cells.length - 1; i >= 0; i--) {
-                const [x, y] = target.cells[i];
-                if (!isCellVerified(y, x)) {
-                    targetCell = target.cells[i];
-                    break;
-                }
-            }
-            curCol = targetCell[0];
-            curRow = targetCell[1];
-        }
-
-        function moveCursor(dRow, dCol) {
-            let r = curRow + dRow, c = curCol + dCol;
-            while (r >= 0 && r < puzzle.height && c >= 0 && c < puzzle.width && puzzle.grid[r][c].block) {
-                r += dRow; c += dCol;
-            }
-            if (r >= 0 && r < puzzle.height && c >= 0 && c < puzzle.width) {
-                if (r !== curRow || c !== curCol) exitRebus();
-                curRow = r; curCol = c;
-                if (dRow !== 0) direction = 'down';
-                else if (dCol !== 0) direction = 'across';
-                render();
-            }
-        }
-
-        // After entering a letter: move to the closest empty cell.
-        //  1. later empty cells in this word,
-        //  2. earlier empty cells in this word,
-        //  3. the next words (cycling across -> down -> across...) that have an empty cell.
-        // Filled letters and filled words are skipped. If nothing is empty the cursor stays.
-        function advanceCursor() {
+        // Correct (locked) cells can't be overwritten. Typing on one just lands
+        // the letter in the next unlocked cell of the same word - never elsewhere.
+        if (isVerified(curRow, curCol)) {
             const clue = currentClue();
             if (!clue) return;
-
             const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
-
-            // Autocheck off: inside a word just step to the next letter (no skipping, so
-            // existing letters can be overwritten). Skipping only happens when jumping words.
-            if (!autoCheck && idx >= 0 && idx < clue.cells.length - 1) {
-                exitRebus();
-                [curCol, curRow] = clue.cells[idx + 1];
-                return;
-            }
-
-            // Autocheck off: never move around inside the word; at its end go to the next word.
-            const order = [];
-            if (autoCheck) {
-                for (let i = idx + 1; i < clue.cells.length; i++) order.push(i);
-                for (let i = 0; i < idx; i++) order.push(i);
-            }
-
-            for (const i of order) {
-                const [x, y] = clue.cells[i];
-                if (!isCellDone(y, x)) {
-                    exitRebus();
-                    [curCol, curRow] = clue.cells[i];
-                    return;
-                }
-            }
-
-            // Word is complete: go to the next word with an empty cell (if any).
-            const seq = allClueSequence();
-            let start = seq.findIndex(s => s.dir === direction && s.clue.number === clue.number);
-            if (start < 0) start = 0;
-            for (let step = 1; step < seq.length; step++) {
-                const entry = seq[(start + step) % seq.length];
-                const empty = entry.clue.cells.find(([x, y]) => !isCellDone(y, x));
-                if (empty) {
-                    exitRebus();
-                    direction = entry.dir;
-                    [curCol, curRow] = empty;
-                    return;
-                }
-            }
+            const next = clue.cells.slice(idx + 1).find(([x, y]) => !isVerified(y, x));
+            if (!next) return;
+            goTo(next);
         }
 
-        function retreatCursor() {
-            const clue = currentClue();
-            if (!clue) return false;
-            const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
+        const ch = letter.toUpperCase();
+        if (rebusMode) {
+            const existing = entryAt(curRow, curCol);
+            const combined = ((existing ? existing.letter : '') + ch).slice(0, 8);
+            userGrid[curRow][curCol] = { letter: combined, pencil: pencilMode, verified: false };
+            if (autoCheck) verifyCell(curRow, curCol);
+            checkProgressAndCompletion();
+            render();
+            return;
+        }
 
+        userGrid[curRow][curCol] = { letter: ch, pencil: pencilMode, verified: false };
+        if (autoCheck) verifyCell(curRow, curCol);
+        checkProgressAndCompletion();
+        advanceAfterTyping();
+        render();
+    }
+
+    function backspace() {
+        if (!puzzle) return;
+
+        // Cell has a (non-locked) letter: delete it and stay put.
+        const e = entryAt(curRow, curCol);
+        if (e && e.letter && !e.verified) {
+            userGrid[curRow][curCol] = e.letter.length > 1
+                ? { letter: e.letter.slice(0, -1), pencil: e.pencil, verified: false }
+                : null;
+            checkProgressAndCompletion();
+            render();
+            return;
+        }
+
+        // Otherwise step back to the previous unlocked cell in the word (and clear it)...
+        const clue = currentClue();
+        if (clue) {
+            const idx = clue.cells.findIndex(([x, y]) => x === curCol && y === curRow);
             for (let i = idx - 1; i >= 0; i--) {
                 const [x, y] = clue.cells[i];
-                if (!isCellVerified(y, x)) {
-                    exitRebus();
-                    [curCol, curRow] = clue.cells[i];
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        function typeLetter(letter) {
-            if (!puzzle || puzzle.grid[curRow][curCol].block) return;
-
-            if (isCellVerified(curRow, curCol)) {
-                advanceCursor();
-                if (isCellVerified(curRow, curCol)) return;
-            }
-
-            const ch = letter.toUpperCase();
-            if (rebusMode) {
-                const existing = userGrid[curRow][curCol];
-                const combined = ((existing ? existing.letter : '') + ch).slice(0, 8);
-                userGrid[curRow][curCol] = { letter: combined, pencil: pencilMode, verified: false };
-                if (autoCheck) verifyCell(curRow, curCol);
+                if (isVerified(y, x)) continue;
+                goTo([x, y]);
+                if (hasLetter(y, x)) userGrid[y][x] = null;
                 checkProgressAndCompletion();
                 render();
                 return;
             }
-
-            userGrid[curRow][curCol] = { letter: ch, pencil: pencilMode, verified: false };
-            if (autoCheck) verifyCell(curRow, curCol);
-
-            checkProgressAndCompletion();
-            advanceCursor();
-            render();
         }
 
-        function backspace() {
-            if (!puzzle) return;
+        // ...or, at the start of the word, to the end of the previous word.
+        const prev = adjacentInSequence(-1);
+        const cells = prev.clue.cells;
+        let target = cells[cells.length - 1];
+        for (let i = cells.length - 1; i >= 0; i--) {
+            if (!isVerified(cells[i][1], cells[i][0])) { target = cells[i]; break; }
+        }
+        goTo(target, prev.dir);
+        render();
+    }
 
-            if (isCellVerified(curRow, curCol)) {
-                if (!retreatCursor()) {
-                    gotoPreviousWordEnd();
-                }
-                render();
-                return;
-            }
+    function selectCell(row, col) {
+        if (row === curRow && col === curCol) { toggleDirection(); return; }
+        exitRebus();
+        const hasA = !!acrossMap[cellKey(col, row)], hasD = !!downMap[cellKey(col, row)];
+        let dir = direction;
+        if (dir === 'across' && !hasA) dir = 'down';
+        if (dir === 'down' && !hasD) dir = 'across';
+        curRow = row; curCol = col; direction = dir;
+        render();
+    }
 
-            const existing = userGrid[curRow][curCol];
-            if (existing && existing.letter && existing.letter.length > 1) {
-                userGrid[curRow][curCol] = { letter: existing.letter.slice(0, -1), pencil: existing.pencil, verified: false };
-            } else if (existing && existing.letter) {
-                userGrid[curRow][curCol] = null;
-            } else {
-                const moved = retreatCursor();
-                if (!moved) {
-                    gotoPreviousWordEnd();
+    function toggleDirection() {
+        if (!puzzle) return;
+        const hasA = !!acrossMap[cellKey(curCol, curRow)], hasD = !!downMap[cellKey(curCol, curRow)];
+        if (hasA && hasD) {
+            exitRebus();
+            direction = OTHER(direction);
+            render();
+        }
+    }
+
+    function moveCursor(dRow, dCol) {
+        let r = curRow + dRow, c = curCol + dCol;
+        while (r >= 0 && r < puzzle.height && c >= 0 && c < puzzle.width && puzzle.grid[r][c].block) {
+            r += dRow; c += dCol;
+        }
+        if (r < 0 || r >= puzzle.height || c < 0 || c >= puzzle.width) return;
+        exitRebus();
+        curRow = r; curCol = c;
+        let dir = dRow !== 0 ? 'down' : 'across';
+        if (!getClue(r, c, dir)) dir = OTHER(dir);   // e.g. a cell that only belongs to a down word
+        direction = dir;
+        render();
+    }
+
+    function togglePencil() {
+        pencilMode = !pencilMode;
+        document.getElementById('pencil-btn').classList.toggle('active', pencilMode);
+    }
+
+    function toggleAutoCheck() {
+        autoCheck = !autoCheck;
+        document.getElementById('autocheck-btn').classList.toggle('active', autoCheck);
+        if (autoCheck && puzzle) {
+            usedCheck = true;   // the puzzle no longer counts as a "gold" (unassisted) solve
+            for (let r = 0; r < puzzle.height; r++)
+                for (let c = 0; c < puzzle.width; c++) verifyCell(r, c);
+        }
+        checkProgressAndCompletion();
+        render();
+    }
+
+    function initKeyboardVisibility() {
+        keyboardVisible = window.innerWidth < 1024;
+        updateKeyboardVisibility();
+    }
+    function toggleKeyboardVisibility() {
+        keyboardVisible = !keyboardVisible;
+        updateKeyboardVisibility();
+    }
+    function updateKeyboardVisibility() {
+        document.getElementById('keyboard').classList.toggle('hidden', !keyboardVisible);
+    }
+
+    // =====================================================================
+    //  Progress / completion
+    // =====================================================================
+    function checkProgressAndCompletion(persist = true) {
+        let filled = 0, total = 0, allCorrect = true;
+
+        for (let y = 0; y < puzzle.height; y++) {
+            for (let x = 0; x < puzzle.width; x++) {
+                const cell = puzzle.grid[y][x];
+                if (cell.block) continue;
+                total++;
+                const e = userGrid[y][x];
+                const letter = typeof e === 'string' ? e : (e ? e.letter : '');
+                if (letter) {
+                    filled++;
+                    if (letter.toUpperCase() !== String(cell.solution).toUpperCase()) allCorrect = false;
                 } else {
-                    if (!isCellVerified(curRow, curCol) && userGrid[curRow][curCol]) {
-                        userGrid[curRow][curCol] = null;
+                    allCorrect = false;
+                }
+            }
+        }
+        currentRatio = total > 0 ? filled / total : 0;
+
+        let justFinished = false;
+        if (allCorrect && !puzzleFinished) {
+            puzzleFinished = true;
+            justFinished = true;
+            stopTimer();
+            playVictorySound();
+
+            const time = formatTime(timerSeconds);
+            showToast(`Puzzle Completed in ${time}!`);
+            document.getElementById('modal-puzzle-title').textContent = puzzle.title || '';
+            document.getElementById('modal-completion-time').textContent = time;
+            document.getElementById('victory-modal').classList.remove('hidden');
+        }
+
+        if (justFinished) {
+            dirty = true;
+            flushSave();   // the leaderboard should see a finish right away
+        } else if (persist) {
+            markDirty();
+        }
+    }
+
+    // =====================================================================
+    //  Building the DOM
+    // =====================================================================
+    function loadPuzzle() {
+        let boot = null;
+        try { boot = JSON.parse(document.getElementById('boot-data').textContent); } catch (e) {}
+        if (!boot || boot.error || !boot.puzzle) {
+            document.getElementById('status').textContent =
+                `Couldn't load this puzzle: ${(boot && boot.error) || 'unknown error'}`;
+            return;
+        }
+
+        puzzle = boot.puzzle;
+        const saved = boot.saved || {};
+        hasSavedRow = Object.keys(saved).length > 0;
+
+        document.getElementById('puzzle-title').textContent = puzzle.title || '';
+        document.title = puzzle.title || document.title;
+
+        lists = { across: puzzle.clues.across, down: puzzle.clues.down };
+        lists.across.forEach(c => c.cells.forEach(([x, y]) => acrossMap[cellKey(x, y)] = c));
+        lists.down.forEach(c => c.cells.forEach(([x, y]) => downMap[cellKey(x, y)] = c));
+        lists.across.concat(lists.down).forEach(c => { numberMap[cellKey(c.col, c.row)] = c.number; });
+
+        userGrid = Array.from({ length: puzzle.height }, () => Array(puzzle.width).fill(null));
+        if (Array.isArray(saved.userGrid) && saved.userGrid.length === puzzle.height) userGrid = saved.userGrid;
+        if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
+        if (saved.usedCheck) usedCheck = saved.usedCheck;
+        if (saved.completed) puzzleFinished = saved.completed;
+        lastSavedSeconds = timerSeconds;
+
+        checkProgressAndCompletion(false);   // recompute the ratio without re-saving
+        updateTimerDisplay();
+
+        buildGridDom();
+        buildKeyboard();
+        buildDesktopCluesList();
+        initKeyboardVisibility();
+        placeInitialCursor();
+
+        if (!puzzleFinished) {
+            startTimer();
+            preloadVictorySound();
+        } else {
+            showToast(`Puzzle Completed in ${formatTime(timerSeconds)}`);
+        }
+
+        document.getElementById('status').classList.add('hidden');
+        document.getElementById('grid').classList.remove('hidden');
+        updateGridDimensions(1);
+        render();
+    }
+
+    function buildGridDom() {
+        const gridEl = document.getElementById('grid');
+        gridEl.innerHTML = '';
+        cellEls = [];
+        for (let y = 0; y < puzzle.height; y++) {
+            const rowEls = [];
+            for (let x = 0; x < puzzle.width; x++) {
+                const data = puzzle.grid[y][x];
+                const div = document.createElement('div');
+                div.dataset.row = y;
+                div.dataset.col = x;
+                div.className = 'cw-cell' + (data.block ? ' block' : '');
+                if (!data.block) {
+                    const num = numberMap[cellKey(x, y)];
+                    if (num) {
+                        const n = document.createElement('span');
+                        n.className = 'num';
+                        n.textContent = num;
+                        div.appendChild(n);
                     }
-                }
-            }
-            checkProgressAndCompletion();
-            render();
-        }
-
-        function togglePencil() {
-            pencilMode = !pencilMode;
-            document.getElementById('pencil-btn').classList.toggle('active', pencilMode);
-        }
-
-        function toggleAutoCheck() {
-            usedCheck = true;
-            autoCheck = !autoCheck;
-            document.getElementById('autocheck-btn').classList.toggle('active', autoCheck);
-            if (autoCheck && puzzle) {
-                for (let r = 0; r < puzzle.height; r++) {
-                    for (let c = 0; c < puzzle.width; c++) {
-                        if (userGrid[r][c]) verifyCell(r, c);
+                    if (data.circled) {
+                        const circle = document.createElement('span');
+                        circle.className = 'circle';
+                        div.appendChild(circle);
                     }
+                    const letter = document.createElement('span');
+                    letter.className = 'letter';
+                    div.appendChild(letter);
                 }
+                gridEl.appendChild(div);
+                rowEls.push(div);
             }
-            checkProgressAndCompletion();
-            render();
+            cellEls.push(rowEls);
         }
+        gridEl.addEventListener('click', e => {
+            const cell = e.target.closest('.cw-cell');
+            if (cell && !cell.classList.contains('block')) selectCell(+cell.dataset.row, +cell.dataset.col);
+        });
+    }
 
-        function computeZoomFromPinch(startZoom, startDist, newDist) {
-            if (!startDist) return startZoom;
-            return clamp(startZoom * (newDist / startDist), MIN_ZOOM, MAX_ZOOM);
-        }
-
-        function updateGridDimensions(targetZoom) {
-            const wrapper = document.getElementById('grid-wrapper');
-            const gridEl = document.getElementById('grid');
-            if (!wrapper || !gridEl || !puzzle) return;
-
-            zoom = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
-
-            const cols = puzzle.width, rows = puzzle.height;
-            const availableWidth = wrapper.clientWidth - 32;
-            const availableHeight = wrapper.clientHeight - 32;
-
-            const fitCell = Math.min(
-                availableWidth > 0 ? availableWidth / cols : 34,
-                availableHeight > 0 ? availableHeight / rows : 34
-            );
-            const baseCell = fitCell;
-            const cellSize = baseCell * zoom;
-
-            gridEl.style.maxWidth = 'none';
-            gridEl.style.width = Math.floor(cellSize * cols) + 'px';
-            gridEl.style.height = Math.floor(cellSize * rows) + 'px';
-        }
-
-        function applyZoomAtPoint(newZoom, focalX, focalY) {
-            const wrapper = document.getElementById('grid-wrapper');
-            if (!wrapper) return;
-
-            const oldZoom = zoom;
-            updateGridDimensions(newZoom);
-
-            const rect = wrapper.getBoundingClientRect();
-            const fx = focalX !== undefined ? focalX - rect.left : rect.width / 2;
-            const fy = focalY !== undefined ? focalY - rect.top : rect.height / 2;
-
-            if (oldZoom !== zoom && oldZoom > 0) {
-                const ratio = zoom / oldZoom;
-                wrapper.scrollLeft = (wrapper.scrollLeft + fx) * ratio - fx;
-                wrapper.scrollTop = (wrapper.scrollTop + fy) * ratio - fy;
-            }
-        }
-
-        function scrollToCurrentCell() {
-            if (!puzzle) return;
-            const wrapper = document.getElementById('grid-wrapper');
-            const gridEl = document.getElementById('grid');
-            if (!wrapper || !gridEl) return;
-
-            let rMin = curRow, rMax = curRow;
-            let cMin = curCol, cMax = curCol;
-
-            if (direction === 'across') {
-                cMin = clamp(curCol - 1, 0, puzzle.width - 1);
-                cMax = clamp(curCol + 2, 0, puzzle.width - 1);
-            } else {
-                rMin = clamp(curRow - 1, 0, puzzle.height - 1);
-                rMax = clamp(curRow + 2, 0, puzzle.height - 1);
-            }
-
-            const minCell = document.querySelector(`.cw-cell[data-row="${rMin}"][data-col="${cMin}"]`);
-            const maxCell = document.querySelector(`.cw-cell[data-row="${rMax}"][data-col="${cMax}"]`);
-
-            if (!minCell || !maxCell) return;
-
-            const wrapperRect = wrapper.getBoundingClientRect();
-            const minRect = minCell.getBoundingClientRect();
-            const maxRect = maxCell.getBoundingClientRect();
-
-            const targetLeft = Math.min(minRect.left, maxRect.left);
-            const targetRight = Math.max(minRect.right, maxRect.right);
-            const targetTop = Math.min(minRect.top, maxRect.top);
-            const targetBottom = Math.max(minRect.bottom, maxRect.bottom);
-
-            const margin = 20;
-
-            let scrollDx = 0;
-            let scrollDy = 0;
-
-            // Only scroll on an axis that actually overflows; otherwise the grid is fully
-            // visible and scrolling would just make it jitter.
-            const overflowX = wrapper.scrollWidth - wrapper.clientWidth > 2;
-            const overflowY = wrapper.scrollHeight - wrapper.clientHeight > 2;
-
-            if (overflowX) {
-                if (targetLeft - margin < wrapperRect.left) {
-                    scrollDx = (targetLeft - margin) - wrapperRect.left;
-                } else if (targetRight + margin > wrapperRect.right) {
-                    scrollDx = (targetRight + margin) - wrapperRect.right;
-                }
-            }
-
-            if (overflowY) {
-                if (targetTop - margin < wrapperRect.top) {
-                    scrollDy = (targetTop - margin) - wrapperRect.top;
-                } else if (targetBottom + margin > wrapperRect.bottom) {
-                    scrollDy = (targetBottom + margin) - wrapperRect.bottom;
-                }
-            }
-
-            if (scrollDx !== 0 || scrollDy !== 0) {
-                wrapper.scrollBy({
-                    left: scrollDx,
-                    top: scrollDy,
-                    behavior: 'smooth'
+    function buildDesktopCluesList() {
+        const build = (type, containerId) => {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            lists[type].forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'clue-item';
+                div.dataset.number = c.number;
+                div.dataset.type = type;
+                const num = document.createElement('span');
+                num.className = 'font-bold min-w-[24px] text-right';
+                num.textContent = `${c.number}.`;
+                const text = document.createElement('span');
+                text.className = 'flex-1';
+                setClueHtml(text, c.text);
+                div.append(num, text);
+                div.addEventListener('click', () => {
+                    goTo(firstOpenCell(c) || c.cells[0], type);
+                    render();
                 });
+                container.appendChild(div);
+            });
+        };
+        build('across', 'across-clues-list');
+        build('down', 'down-clues-list');
+    }
+
+    const CLUE_ITEM_BASE = 'clue-item p-1.5 rounded cursor-pointer transition flex gap-2 ';
+    const CLUE_ITEM_IDLE = CLUE_ITEM_BASE + 'hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200';
+    const CLUE_ITEM_ACTIVE = CLUE_ITEM_BASE + 'text-slate-900 font-semibold bg-[#a9d8f5] dark:bg-[#2c5a82] dark:text-white';
+
+    function updateDesktopCluesHighlight() {
+        const cur = currentClue();
+        document.querySelectorAll('.clue-item').forEach(el => {
+            const active = cur && +el.dataset.number === cur.number && el.dataset.type === direction;
+            el.className = active ? CLUE_ITEM_ACTIVE : CLUE_ITEM_IDLE;
+            if (active) {
+                // Scroll only the clue list itself.
+                const list = el.parentElement;
+                if (list && list.scrollHeight > list.clientHeight + 2) {
+                    const lr = list.getBoundingClientRect(), er = el.getBoundingClientRect();
+                    if (er.top < lr.top) list.scrollTo({ top: list.scrollTop + (er.top - lr.top) - 4, behavior: 'smooth' });
+                    else if (er.bottom > lr.bottom) list.scrollTo({ top: list.scrollTop + (er.bottom - lr.bottom) + 4, behavior: 'smooth' });
+                }
             }
-        }
+        });
+    }
 
-        function distanceBetween(t1, t2) {
-            const dx = t1.clientX - t2.clientX;
-            const dy = t1.clientY - t2.clientY;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
+    // ---------- Keyboard ----------
+    function buildKeyboard() {
+        const rows = keyboardMode === 'abc'
+            ? [
+                ['Q','W','E','R','T','Y','U','I','O','P'],
+                ['A','S','D','F','G','H','J','K','L'],
+                [{ type: 'more' }, 'Z','X','C','V','B','N','M', { type: 'back' }],
+              ]
+            : [
+                ['1','2','3','4','5','6','7','8','9','0'],
+                ['@','#','$','%','&','*','-','!','+'],
+                [{ type: 'abc' }, "'", ',', '.', ':', '/', { type: 'rebus' }, { type: 'back' }],
+              ];
 
-        function setupZoomListeners() {
-            const wrapper = document.getElementById('grid-wrapper');
+        const kb = document.getElementById('keyboard');
+        kb.innerHTML = '';
+        rows.forEach(keys => {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'flex';
+            keys.forEach(k => rowEl.appendChild(buildKey(k)));
+            kb.appendChild(rowEl);
+        });
+    }
 
-            wrapper.addEventListener('wheel', e => {
-                if (e.ctrlKey || e.metaKey || e.altKey) {
-                    e.preventDefault();
-                    const delta = e.deltaY < 0 ? 0.15 : -0.15;
-                    applyZoomAtPoint(zoom + delta, e.clientX, e.clientY);
-                }
-            }, { passive: false });
-
-            wrapper.addEventListener('touchstart', e => {
-                if (e.touches.length === 2) {
-                    const rect = wrapper.getBoundingClientRect();
-                    const t0 = e.touches[0];
-                    const t1 = e.touches[1];
-                    const cX = (t0.clientX + t1.clientX) / 2;
-                    const cY = (t0.clientY + t1.clientY) / 2;
-
-                    pinchState = {
-                        startDist: distanceBetween(t0, t1),
-                        startZoom: zoom,
-                        contentX: wrapper.scrollLeft + (cX - rect.left),
-                        contentY: wrapper.scrollTop + (cY - rect.top)
-                    };
-                }
-            }, { passive: true });
-
-            wrapper.addEventListener('touchmove', e => {
-                if (e.touches.length === 2 && pinchState) {
-                    e.preventDefault(); // Intercept browser pinch to handle grid scale + pan
-
-                    const t0 = e.touches[0];
-                    const t1 = e.touches[1];
-                    const newDist = distanceBetween(t0, t1);
-                    const currentCenterX = (t0.clientX + t1.clientX) / 2;
-                    const currentCenterY = (t0.clientY + t1.clientY) / 2;
-
-                    const scale = pinchState.startDist > 0 ? (newDist / pinchState.startDist) : 1;
-                    const targetZoom = clamp(pinchState.startZoom * scale, MIN_ZOOM, MAX_ZOOM);
-
-                    if (zoomFrame) cancelAnimationFrame(zoomFrame);
-                    zoomFrame = requestAnimationFrame(() => {
-                        updateGridDimensions(targetZoom);
-
-                        const effectiveScale = zoom / pinchState.startZoom;
-                        const rect = wrapper.getBoundingClientRect();
-
-                        // Keep the exact touch anchor point locked under your fingers while scaling and panning
-                        wrapper.scrollLeft = (pinchState.contentX * effectiveScale) - (currentCenterX - rect.left);
-                        wrapper.scrollTop = (pinchState.contentY * effectiveScale) - (currentCenterY - rect.top);
-                    });
-                }
-            }, { passive: false });
-
-            wrapper.addEventListener('touchend', e => {
-                if (e.touches.length < 2) pinchState = null;
-            });
-            wrapper.addEventListener('touchcancel', e => {
-                if (e.touches.length < 2) pinchState = null;
+    function buildKey(k) {
+        const el = document.createElement('div');
+        if (typeof k === 'object') {
+            el.className = 'kb-key func-key';
+            if (k.type === 'back') {
+                el.innerHTML = '<svg class="w-6 h-6 mx-auto pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-9.172a2 2 0 00-1.414.586L3 12z"/></svg>';
+                el.addEventListener('pointerdown', e => { e.preventDefault(); backspace(); });
+            } else if (k.type === 'more') {
+                el.textContent = 'more'; el.style.fontSize = '13px';
+                el.addEventListener('pointerdown', e => { e.preventDefault(); keyboardMode = 'more'; buildKeyboard(); });
+            } else if (k.type === 'abc') {
+                el.textContent = 'ABC'; el.style.fontSize = '13px';
+                el.addEventListener('pointerdown', e => { e.preventDefault(); keyboardMode = 'abc'; buildKeyboard(); });
+            } else if (k.type === 'rebus') {
+                if (rebusMode) el.classList.add('active-toggle');
+                el.style.fontSize = '13px';
+                el.textContent = rebusMode ? 'REBUS ON' : 'Rebus';
+                el.addEventListener('pointerdown', e => { e.preventDefault(); toggleRebus(); });
+            }
+        } else {
+            el.className = 'kb-key';
+            el.textContent = k;
+            el.addEventListener('pointerdown', e => {
+                e.preventDefault();
+                showKeyPopup(el, k);
+                typeLetter(k);
             });
         }
+        return el;
+    }
 
-        function render() {
-            const clue = currentClue();
-            const activeCells = clue ? new Set(clue.cells.map(([x, y]) => cellKey(x, y))) : new Set();
+    function showKeyPopup(keyEl, label) {
+        const pop = document.getElementById('key-popover');
+        const rect = keyEl.getBoundingClientRect();
+        pop.textContent = label;
+        pop.style.left = (rect.left + rect.width / 2) + 'px';
+        pop.style.top = rect.top + 'px';
+        pop.style.display = 'block';
+        if (popoverTimeout) clearTimeout(popoverTimeout);
+        popoverTimeout = setTimeout(() => { pop.style.display = 'none'; }, 120);
+    }
 
-            document.querySelectorAll('#grid .cw-cell').forEach(div => {
-                if (div.classList.contains('block')) return;
-                const row = +div.dataset.row, col = +div.dataset.col;
-                const inWord = activeCells.has(cellKey(col, row));
+    // =====================================================================
+    //  Sizing / zoom
+    // =====================================================================
+    // Cell size is always a whole number of pixels. At zoom 1 the grid (plus
+    // its 16px padding) fits the wrapper exactly, so there is nothing to scroll.
+    function updateGridDimensions(targetZoom) {
+        const wrapper = document.getElementById('grid-wrapper');
+        const gridEl = document.getElementById('grid');
+        if (!wrapper || !puzzle || wrapper.clientWidth === 0) return;
+
+        zoom = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
+        const cols = puzzle.width, rows = puzzle.height;
+        const chromeX = 4 + (cols - 1), chromeY = 4 + (rows - 1);   // grid padding + gaps
+        const fitW = (wrapper.clientWidth - 32 - chromeX) / cols;
+        const fitH = (wrapper.clientHeight - 32 - chromeY) / rows;
+        const cell = Math.max(10, Math.floor(Math.min(fitW, fitH) * zoom));
+
+        gridEl.style.setProperty('--cell', cell + 'px');
+        gridEl.style.gridTemplateColumns = `repeat(${cols}, ${cell}px)`;
+        gridEl.style.gridTemplateRows = `repeat(${rows}, ${cell}px)`;
+    }
+
+    function applyZoomAtPoint(newZoom, focalX, focalY) {
+        const wrapper = document.getElementById('grid-wrapper');
+        const gridEl = document.getElementById('grid');
+        const oldZoom = zoom, oldW = gridEl.offsetWidth;
+        updateGridDimensions(newZoom);
+        if (oldZoom === zoom || !oldW) return;
+
+        const rect = wrapper.getBoundingClientRect();
+        const fx = focalX !== undefined ? focalX - rect.left : rect.width / 2;
+        const fy = focalY !== undefined ? focalY - rect.top : rect.height / 2;
+        const ratio = gridEl.offsetWidth / oldW;
+        wrapper.scrollLeft = (wrapper.scrollLeft + fx) * ratio - fx;
+        wrapper.scrollTop = (wrapper.scrollTop + fy) * ratio - fy;
+    }
+
+    // Keep the current cell on screen - but only on an axis that actually overflows.
+    function scrollToCurrentCell() {
+        const wrapper = document.getElementById('grid-wrapper');
+        const el = cellEls[curRow] && cellEls[curRow][curCol];
+        if (!wrapper || !el) return;
+
+        const overflowX = wrapper.scrollWidth - wrapper.clientWidth > 1;
+        const overflowY = wrapper.scrollHeight - wrapper.clientHeight > 1;
+        if (!overflowX && !overflowY) return;
+
+        const w = wrapper.getBoundingClientRect(), c = el.getBoundingClientRect();
+        const margin = Math.max(20, c.width * 1.5);
+        let dx = 0, dy = 0;
+        if (overflowX) {
+            if (c.left - margin < w.left) dx = c.left - margin - w.left;
+            else if (c.right + margin > w.right) dx = c.right + margin - w.right;
+        }
+        if (overflowY) {
+            if (c.top - margin < w.top) dy = c.top - margin - w.top;
+            else if (c.bottom + margin > w.bottom) dy = c.bottom + margin - w.bottom;
+        }
+        if (dx || dy) wrapper.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+    }
+
+    function setupZoomListeners() {
+        const wrapper = document.getElementById('grid-wrapper');
+        const gridEl = document.getElementById('grid');
+        let pinch = null, frame = null;
+        const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+        wrapper.addEventListener('wheel', e => {
+            if (e.ctrlKey || e.metaKey || e.altKey) {
+                e.preventDefault();
+                applyZoomAtPoint(zoom + (e.deltaY < 0 ? 0.15 : -0.15), e.clientX, e.clientY);
+            }
+        }, { passive: false });
+
+        wrapper.addEventListener('touchstart', e => {
+            if (e.touches.length !== 2) return;
+            const rect = wrapper.getBoundingClientRect();
+            const [t0, t1] = e.touches;
+            const cx = (t0.clientX + t1.clientX) / 2, cy = (t0.clientY + t1.clientY) / 2;
+            pinch = {
+                startDist: dist(t0, t1),
+                startZoom: zoom,
+                startW: gridEl.offsetWidth,
+                contentX: wrapper.scrollLeft + (cx - rect.left),
+                contentY: wrapper.scrollTop + (cy - rect.top)
+            };
+        }, { passive: true });
+
+        wrapper.addEventListener('touchmove', e => {
+            if (e.touches.length !== 2 || !pinch) return;
+            e.preventDefault();   // we handle pinch scale + pan ourselves
+            const [t0, t1] = e.touches;
+            const cx = (t0.clientX + t1.clientX) / 2, cy = (t0.clientY + t1.clientY) / 2;
+            const target = clamp(pinch.startZoom * (pinch.startDist > 0 ? dist(t0, t1) / pinch.startDist : 1), MIN_ZOOM, MAX_ZOOM);
+
+            if (frame) cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(() => {
+                updateGridDimensions(target);
+                const ratio = pinch.startW ? gridEl.offsetWidth / pinch.startW : 1;
+                const rect = wrapper.getBoundingClientRect();
+                wrapper.scrollLeft = pinch.contentX * ratio - (cx - rect.left);
+                wrapper.scrollTop = pinch.contentY * ratio - (cy - rect.top);
+            });
+        }, { passive: false });
+
+        const end = e => { if (e.touches.length < 2) pinch = null; };
+        wrapper.addEventListener('touchend', end);
+        wrapper.addEventListener('touchcancel', end);
+
+        // Re-fit when the wrapper changes size (rotation, keyboard toggle, ...).
+        if (window.ResizeObserver) {
+            new ResizeObserver(() => { if (puzzle) updateGridDimensions(zoom); }).observe(wrapper);
+        } else {
+            window.addEventListener('resize', () => { if (puzzle) updateGridDimensions(zoom); });
+        }
+    }
+
+    // =====================================================================
+    //  Rendering
+    // =====================================================================
+    // Shrinks the clue text until it fits the (fixed-height) clue bar.
+    function fitClueText() {
+        const box = document.getElementById('clue-box');
+        const p = document.getElementById('clue-text');
+        let size = 17;
+        p.style.fontSize = size + 'px';
+        while (p.offsetHeight > box.clientHeight && size > 10) {
+            size--;
+            p.style.fontSize = size + 'px';
+        }
+    }
+
+    function render() {
+        const clue = currentClue();
+        const active = clue ? new Set(clue.cells.map(([x, y]) => cellKey(x, y))) : new Set();
+
+        for (let row = 0; row < puzzle.height; row++) {
+            for (let col = 0; col < puzzle.width; col++) {
+                const div = cellEls[row][col];
+                if (div.classList.contains('block')) continue;
+
                 const isCurrent = row === curRow && col === curCol;
-                div.classList.toggle('in-word', inWord && !isCurrent);
+                div.classList.toggle('in-word', active.has(cellKey(col, row)) && !isCurrent);
                 div.classList.toggle('current', isCurrent);
 
                 const entry = userGrid[row][col];
-                const letterSpan = div.querySelector('.letter');
-                letterSpan.textContent = entry ? entry.letter : '';
+                const letterEl = div.lastElementChild;   // the .letter span is always last
+                const text = entry ? entry.letter : '';
+                if (letterEl.textContent !== text) letterEl.textContent = text;
 
-                if (entry && entry.letter.length > 1) {
-                    const len = entry.letter.length;
-                    const scale = Math.max(0.28, 0.6 - (len * 0.06));
-                    letterSpan.style.fontSize = `calc(${scale * 100}cqw / var(--cw-cols, 15))`;
-                } else {
-                    letterSpan.style.fontSize = '';
+                if (text.length > 1) {
+                    const scale = Math.max(0.28, 0.6 - text.length * 0.06);
+                    letterEl.style.fontSize = `calc(var(--cell, 30px) * ${scale})`;
+                } else if (letterEl.style.fontSize) {
+                    letterEl.style.fontSize = '';
                 }
 
-                const isVerified = entry && entry.verified;
-                const solution = puzzle.grid[row][col].solution;
-                const isWrong = autoCheck && entry && entry.letter && entry.letter !== solution;
-
-                div.classList.toggle('correct-letter', !!isVerified);
-                div.classList.toggle('wrong-letter', !isVerified && !!isWrong);
-                div.classList.toggle('pencil-letter', !!(entry && entry.pencil && !isVerified));
-            });
-
-            const clueTextEl = document.getElementById('clue-text');
-            if (clue) clueTextEl.textContent = clue.text;
-            else clueTextEl.textContent = '';
-
-            updateDesktopCluesHighlight();
-            scrollToCurrentCell();
+                const verified = !!(entry && entry.verified);
+                const wrong = autoCheck && !!(entry && entry.letter) && !verified &&
+                    entry.letter.toUpperCase() !== String(puzzle.grid[row][col].solution).toUpperCase();
+                div.classList.toggle('correct-letter', verified);
+                div.classList.toggle('wrong-letter', wrong);
+                div.classList.toggle('pencil-letter', !!(entry && entry.pencil && !verified));
+            }
         }
 
-        document.addEventListener('keydown', e => {
-            if (!puzzle) return;
-            if (/^[a-zA-Z0-9]$/.test(e.key)) {
-                typeLetter(e.key);
-            } else if (e.key === 'Backspace' || e.key === 'Delete') {
-                backspace();
-                e.preventDefault();
-            } else if (e.key === 'ArrowLeft') {
-                moveCursor(0, -1); e.preventDefault();
-            } else if (e.key === 'ArrowRight') {
-                moveCursor(0, 1); e.preventDefault();
-            } else if (e.key === 'ArrowUp') {
-                moveCursor(-1, 0); e.preventDefault();
-            } else if (e.key === 'ArrowDown') {
-                moveCursor(1, 0); e.preventDefault();
-            } else if (e.key === ' ') {
-                toggleDirection(); e.preventDefault();
-            } else if (e.key === 'Tab') {
-                gotoAdjacentClue(e.shiftKey ? -1 : 1); e.preventDefault();
-            }
-        });
+        setClueHtml(document.getElementById('clue-text'), clue ? clue.text : '');
+        fitClueText();
+        updateDesktopCluesHighlight();
+        scrollToCurrentCell();
+    }
 
-        setupZoomListeners();
-        window.addEventListener('resize', () => { if (puzzle) applyZoomAtPoint(zoom); });
-        loadPuzzle();
+    // =====================================================================
+    //  Hardware keyboard
+    // =====================================================================
+    document.addEventListener('keydown', e => {
+        if (!puzzle || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (/^[a-zA-Z0-9]$/.test(e.key)) {
+            typeLetter(e.key);
+        } else if (e.key === 'Backspace' || e.key === 'Delete') {
+            backspace(); e.preventDefault();
+        } else if (e.key === 'ArrowLeft')  { moveCursor(0, -1); e.preventDefault(); }
+        else if (e.key === 'ArrowRight')   { moveCursor(0, 1);  e.preventDefault(); }
+        else if (e.key === 'ArrowUp')      { moveCursor(-1, 0); e.preventDefault(); }
+        else if (e.key === 'ArrowDown')    { moveCursor(1, 0);  e.preventDefault(); }
+        else if (e.key === ' ')            { toggleDirection(); e.preventDefault(); }
+        else if (e.key === 'Tab')          { gotoAdjacentClue(e.shiftKey ? -1 : 1); e.preventDefault(); }
+    });
+
+    window.addEventListener('resize', () => { if (puzzle) fitClueText(); });
+
+    setupZoomListeners();
+    loadPuzzle();
     </script>
 </body>
 </html>
