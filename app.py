@@ -197,6 +197,10 @@ def init_db():
             )
         ''')
 
+        cursor.execute("PRAGMA table_info(progress)")
+        if 'auto_check' not in [c[1] for c in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE progress ADD COLUMN auto_check INTEGER DEFAULT 0")
+
         # Make the admin flag mirror ADMIN_USERNAMES exactly.
         cursor.execute('UPDATE users SET is_admin = 0')
         for name in ADMIN_USERNAMES:
@@ -257,7 +261,7 @@ def get_saved_progress(user_id, publisher, year, month, day_key):
     """The saved state for one puzzle (same shape the progress API returns)."""
     with db() as conn:
         row = conn.execute('''
-            SELECT user_grid, timer_seconds, ratio, completed, used_check
+            SELECT user_grid, timer_seconds, ratio, completed, used_check, auto_check
             FROM progress WHERE user_id = ? AND publisher = ? AND year = ? AND month = ? AND day_key = ?
         ''', (user_id, publisher, year, month, day_key)).fetchone()
     if not row:
@@ -271,7 +275,8 @@ def get_saved_progress(user_id, publisher, year, month, day_key):
         'timerSeconds': row[1],
         'ratio': row[2],
         'completed': bool(row[3]),
-        'usedCheck': bool(row[4])
+        'usedCheck': bool(row[4]),
+        'autoCheck': bool(row[5]),
     }
 
 
@@ -912,20 +917,20 @@ def get_user_stats():
 
     user_id = session['user_id']
     with db() as conn:
-        # Only Spelling Bee rows need their saved grid (the found words).
         rows = conn.execute(
             "SELECT publisher, year, month, day_key, timer_seconds, ratio, completed, used_check, "
-            "CASE WHEN publisher = ? THEN user_grid ELSE NULL END "
+            "CASE WHEN publisher IN (?, ?) THEN user_grid ELSE NULL END "
             "FROM progress WHERE user_id = ?",
-            (SPELLING_BEE_PUBLISHER, user_id)
+            (SPELLING_BEE_PUBLISHER, WORDLE_PUBLISHER, user_id)
         ).fetchall()
 
-    xw = {k: {'played': 0, 'solved': 0, 'times': []} for k in ('normal', 'midi', 'mini')}
+    xw = {k: {'played': 0, 'solved': 0, 'gold': 0, 'times': []} for k in ('normal', 'midi', 'mini')}
     by_day = {d: [] for d in ('Monday', 'Tuesday', 'Wednesday', 'Thursday',
                               'Friday', 'Saturday', 'Sunday')}
 
     wordle_finished = 0
     wordle_wins = 0
+    wordle_hard_wins = 0
     wordle_win_guesses = []
     wordle_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
 
@@ -943,6 +948,12 @@ def get_user_stats():
             if completed:
                 wordle_finished += 1
                 if used_check:
+                    try:
+                        g = json.loads(grid_json) if grid_json else {}
+                    except ValueError:
+                        g = {}
+                    if isinstance(g, dict) and g.get('hard'):
+                        wordle_hard_wins += 1
                     wordle_wins += 1
                     if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
                         wordle_win_guesses.append(secs)
@@ -993,6 +1004,8 @@ def get_user_stats():
             kind = 'normal'
         bucket = xw[kind]
         if completed or (ratio or 0) > 0:
+            if not used_check:
+                bucket['gold'] += 1
             bucket['played'] += 1
         if completed:
             bucket['solved'] += 1
@@ -1011,6 +1024,7 @@ def get_user_stats():
             'solved': b['solved'],
             'solveRate': _pct(b['solved'], b['played']),
             'avgTime': _avg(b['times']),
+            'noCheckRate': _pct(b['gold'], b['solved']),
         }
 
     crossword = xw_summary(xw['normal'])
@@ -1023,6 +1037,8 @@ def get_user_stats():
             'winRate': _pct(wordle_wins, wordle_finished),
             'avgGuesses': _avg(wordle_win_guesses, 1),
             'distribution': wordle_dist,
+            'hardRate': _pct(wordle_hard_wins, wordle_wins),
+            'hardWins': wordle_hard_wins,
         },
         'bee': {
             'played': bee_played,
@@ -1064,21 +1080,23 @@ def handle_puzzle_progress(publisher, year, month, day_key):
         data = request.get_json(silent=True) or {}
         with db() as conn:
             conn.execute('''
-                INSERT INTO progress (user_id, publisher, year, month, day_key, user_grid, timer_seconds, ratio, completed, used_check)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO progress (user_id, publisher, year, month, day_key, user_grid, timer_seconds, ratio, completed, used_check, auto_check)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, publisher, year, month, day_key) DO UPDATE SET
                     user_grid = excluded.user_grid,
                     timer_seconds = excluded.timer_seconds,
                     ratio = excluded.ratio,
                     completed = excluded.completed,
-                    used_check = excluded.used_check
+                    used_check = excluded.used_check,
+                    auto_check = excluded.auto_check
             ''', (
                 user_id, publisher, year, month, day_key,
                 json.dumps(data.get('userGrid', [])),
                 data.get('timerSeconds', 0),
                 data.get('ratio', 0.0),
                 1 if data.get('completed') else 0,
-                1 if data.get('usedCheck') else 0
+                1 if data.get('usedCheck') else 0,
+                1 if data.get('autoCheck') else 0
             ))
         return jsonify({'status': 'success'})
 

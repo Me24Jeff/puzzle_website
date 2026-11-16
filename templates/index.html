@@ -660,7 +660,8 @@
                 statTile('Avg guesses', dash(w.avgGuesses), 'per win'),
                 statTile('Played', String(w.played)),
                 statTile('Won', w.winRate === null ? '--' : `${w.winRate}%`, `${w.wins} of ${w.played}`),
-            ], 3) + distBars('Guess Distribution', dist, '#a78bfa', 'No solved Wordles yet.');
+                statTile('Hard mode', w.hardRate === null ? '--' : `${w.hardRate}%`, `${w.hardWins} of ${w.wins} wins`),
+            ], 2) + distBars('Guess Distribution', dist, '#a78bfa', 'No solved Wordles yet.');
         }
 
         function renderBeeStats(b) {
@@ -681,7 +682,8 @@
                 statTile('Played', String(x.played)),
                 statTile('Solved', x.solveRate === null ? '--' : `${x.solveRate}%`, `${x.solved} of ${x.played}`),
                 statTile('Avg time', formatTime(x.avgTime), 'solved puzzles'),
-            ], 3);
+                statTile('No autocheck', x.noCheckRate === null ? '--' : `${x.noCheckRate}%`, 'of solved puzzles'),
+            ], 2);
         }
 
         function renderCrosswordStats(x) {

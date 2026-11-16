@@ -492,7 +492,7 @@
     function startTimer() {
         stopTimer();
         timerInterval = setInterval(() => {
-            if (puzzleFinished) return;
+            if (puzzleFinished || document.hidden || !document.hasFocus()) return;
             timerSeconds++;
             updateTimerDisplay();
             if (timerSeconds % 60 === 0) flushSave();   // edits are saved as they happen
@@ -535,7 +535,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 userGrid, timerSeconds, ratio: currentRatio,
-                completed: puzzleFinished, usedCheck
+                completed: puzzleFinished, usedCheck, autoCheck
             })
         }).then(r => {
             if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
@@ -725,6 +725,7 @@
     }
 
     function toggleRebus() {
+        if (puzzleFinished) return;
         rebusMode = !rebusMode;
         document.getElementById('rebus-badge').style.display = rebusMode ? 'flex' : 'none';
         if (rebusMode) keyboardMode = 'abc';
@@ -732,6 +733,7 @@
     }
 
     function typeLetter(letter) {
+        if (puzzleFinished) return;
         if (!puzzle || puzzle.grid[curRow][curCol].block) return;
 
         // Correct (locked) cells can't be overwritten. Typing on one just lands
@@ -764,6 +766,7 @@
     }
 
     function backspace() {
+        if (puzzleFinished) return;
         if (!puzzle) return;
 
         // Cell has a (non-locked) letter: delete it and stay put.
@@ -844,6 +847,7 @@
     }
 
     function toggleAutoCheck() {
+        if (puzzleFinished) return;
         autoCheck = !autoCheck;
         document.getElementById('autocheck-btn').classList.toggle('active', autoCheck);
         if (autoCheck && puzzle) {
@@ -942,6 +946,13 @@
         if (saved.usedCheck) usedCheck = saved.usedCheck;
         if (saved.completed) puzzleFinished = saved.completed;
         lastSavedSeconds = timerSeconds;
+
+        if (saved.autoCheck) {
+            autoCheck = true;
+            document.getElementById('autocheck-btn').classList.add('active');
+            for (let r = 0; r < puzzle.height; r++)
+                for (let c = 0; c < puzzle.width; c++) verifyCell(r, c);
+        }
 
         checkProgressAndCompletion(false);   // recompute the ratio without re-saving
         updateTimerDisplay();

@@ -369,21 +369,40 @@
         // ---- Hard mode ----
         // Every guess must reuse all hints revealed so far: green letters stay in place,
         // yellow letters must appear somewhere. Can only be switched on before the first guess.
-        const HARD_KEY = 'wordle-hard-mode';
+        const HARD_PREF_KEY = 'wordle-hard-mode';                                   // last choice, used for new puzzles
+        const HARD_PUZZLE_KEY = `wordle-hard-${meta.year}-${meta.month}-${meta.day}`; // this puzzle's own choice
+        const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+        const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
         let hardMode = false;
-        try { hardMode = localStorage.getItem(HARD_KEY) === '1'; } catch (e) {}
-        if (hardMode) document.getElementById('hard-mode-btn').classList.toggle('active', hardMode);
+        (function initHardMode() {
+            const g = SAVED && SAVED.userGrid;
+            const started = !!(g && Array.isArray(g.guesses) && g.guesses.length > 0);
+            if (started) {
+                hardMode = g.hard === true;            // started puzzles keep their own setting
+            } else {
+                const own = lsGet(HARD_PUZZLE_KEY);    // toggled here before, but no guess yet
+                hardMode = (own !== null ? own : lsGet(HARD_PREF_KEY)) === '1';
+            }
+            document.getElementById('hard-mode-btn').classList.toggle('active', hardMode);
+        })();
 
         function toggleHardMode() {
             if (gameOver) return;
+
+            // Turning ON is only allowed before the first guess.
             if (!hardMode && guesses.length > 0) {
                 showToast("Hard mode can only be turned on before your first guess");
                 return;
             }
+
             hardMode = !hardMode;
-            try { localStorage.setItem(HARD_KEY, hardMode ? '1' : '0'); } catch (e) {}
+            lsSet(HARD_PREF_KEY, hardMode ? '1' : '0');      // remembered for new puzzles
+            lsSet(HARD_PUZZLE_KEY, hardMode ? '1' : '0');    // this puzzle's own choice
             document.getElementById('hard-mode-btn').classList.toggle('active', hardMode);
             showToast(hardMode ? "Hard mode on" : "Hard mode off");
+
+            if (guesses.length > 0) saveProgress();
         }
 
         function ordinal(n) {
@@ -437,7 +456,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    userGrid: { guesses: guesses, results: results },
+                    userGrid: { guesses: guesses, results: results, hard: hardMode },
                     timerSeconds: guesses.length,   // repurposed for Wordle: number of guesses used
                     ratio: guesses.length / MAX_ATTEMPTS,
                     completed: gameOver,
