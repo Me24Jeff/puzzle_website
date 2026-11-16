@@ -601,8 +601,9 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
                         </svg>
                     </button>
-                    <div id="stat-body-${s.id}" class="hidden bg-white dark:bg-neutral-800 p-4 space-y-4">
-                        <p class="text-xs text-slate-400 dark:text-neutral-500">Loading...</p>
+                    <div id="stat-body-${s.id}" class="hidden p-4 space-y-4"
+                        style="background-color: ${s.color}; color: #0f172a;">
+                        <p class="text-xs opacity-60">Loading...</p>
                     </div>
                 </div>
             `).join('');
@@ -619,10 +620,10 @@
 
         function statTile(label, value, sub) {
             return `
-                <div class="bg-slate-50 dark:bg-neutral-900 border border-slate-100 dark:border-neutral-700 rounded-xl p-3">
-                    <div class="text-[11px] font-bold text-slate-500 dark:text-neutral-400 mb-0.5">${escapeHtml(label)}</div>
-                    <div class="text-xl font-black text-slate-800 dark:text-white break-words">${escapeHtml(value)}</div>
-                    ${sub ? `<div class="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 mt-0.5">${escapeHtml(sub)}</div>` : ''}
+                <div class="rounded-xl p-3 border border-black/10" style="background-color: rgba(255,255,255,0.35);">
+                    <div class="text-[11px] font-bold opacity-60 mb-0.5">${escapeHtml(label)}</div>
+                    <div class="text-xl font-black break-words">${escapeHtml(value)}</div>
+                    ${sub ? `<div class="text-[10px] font-semibold opacity-50 mt-0.5">${escapeHtml(sub)}</div>` : ''}
                 </div>`;
         }
 
@@ -630,26 +631,26 @@
             return `<div class="grid ${cols === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2.5">${tiles.join('')}</div>`;
         }
 
-        function distBars(title, items, color, emptyText) {
+        function distBars(title, items, color, emptyText, labelClass = 'w-20') {
             const total = items.reduce((a, b) => a + b.count, 0);
             let inner;
             if (total === 0) {
-                inner = `<p class="text-xs text-slate-400 dark:text-neutral-500">${emptyText}</p>`;
+                inner = `<p class="text-xs opacity-60">${emptyText}</p>`;
             } else {
                 const max = Math.max(1, ...items.map(i => i.count));
                 inner = items.map(i => {
                     const pct = Math.round((i.count / max) * 100);
                     return `
                         <div class="flex items-center gap-2">
-                            <span class="w-20 text-xs font-bold text-slate-500 dark:text-neutral-400 truncate">${escapeHtml(i.label)}</span>
-                            <div class="flex-1 h-5 bg-slate-100 dark:bg-neutral-900 rounded-md overflow-hidden">
-                                <div class="h-full rounded-md transition-all" style="width: ${i.count > 0 ? Math.max(pct, 6) : 0}%; background-color: ${color};"></div>
+                            <span class="${labelClass} text-xs font-bold opacity-70 truncate">${escapeHtml(i.label)}</span>
+                            <div class="flex-1 h-5 rounded-md overflow-hidden" style="background-color: rgba(255,255,255,0.35);">
+                                <div class="h-full rounded-md transition-all" style="width: ${i.count > 0 ? Math.max(pct, 6) : 0}%; background-color: rgba(15,23,42,0.65);"></div>
                             </div>
-                            <span class="w-6 text-xs font-semibold text-slate-500 dark:text-neutral-400 text-right">${i.count}</span>
+                            <span class="w-6 text-xs font-semibold opacity-70 text-right">${i.count}</span>
                         </div>`;
                 }).join('');
             }
-            return `<div><h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">${title}</h3><div class="space-y-1.5">${inner}</div></div>`;
+            return `<div><h3 class="text-xs font-bold opacity-70 mb-2">${title}</h3><div class="space-y-1.5">${inner}</div></div>`;
         }
 
         const dash = v => (v === null || v === undefined) ? '--' : String(v);
@@ -661,7 +662,7 @@
                 statTile('Played', String(w.played)),
                 statTile('Won', w.winRate === null ? '--' : `${w.winRate}%`, `${w.wins} of ${w.played}`),
                 statTile('Hard mode', w.hardRate === null ? '--' : `${w.hardRate}%`, `${w.hardWins} of ${w.wins} wins`),
-            ], 2) + distBars('Guess Distribution', dist, '#a78bfa', 'No solved Wordles yet.');
+            ], 2) + distBars('Guess Distribution', dist, '#a78bfa', 'No solved Wordles yet.', 'w-3 text-center');
         }
 
         function renderBeeStats(b) {
@@ -691,17 +692,17 @@
             const days = order.map(day => {
                 const d = (x.byDay || {})[day] || { avg: null, count: 0 };
                 return `
-                    <div class="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-neutral-900 rounded-xl border border-slate-100 dark:border-neutral-700">
-                        <span class="font-semibold text-slate-700 dark:text-neutral-300 text-xs">${day}</span>
+                    <div class="flex items-center justify-between p-2.5 rounded-xl border border-black/10" style="background-color: rgba(255,255,255,0.35);">
+                        <span class="font-semibold opacity-80 text-xs">${day}</span>
                         <div class="text-right">
-                            <span class="font-bold text-slate-800 dark:text-white text-sm">${formatTime(d.avg)}</span>
-                            <span class="text-[10px] text-slate-400 dark:text-neutral-500 block">${d.count} solved</span>
+                            <span class="font-bold text-sm">${formatTime(d.avg)}</span>
+                            <span class="text-[10px] opacity-50 block">${d.count} solved</span>
                         </div>
                     </div>`;
             }).join('');
             return renderXwStats(x) + `
                 <div>
-                    <h3 class="text-xs font-bold text-slate-500 dark:text-neutral-400 mb-2">Average Time by Day</h3>
+                    <h3 class="text-xs font-bold opacity-70 mb-2">Average Time by Day</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">${days}</div>
                 </div>`;
         }
