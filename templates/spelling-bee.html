@@ -319,9 +319,15 @@
 
     <script>
         function goBack() {
-            const params = new URLSearchParams(window.location.search);
-            const back = params.get('back');
-            window.location.href = back ? decodeURIComponent(back) : '/';
+            const back = new URLSearchParams(window.location.search).get('back');
+            let dest = '/';
+            // Only ever follow a same-origin link: ?back= is attacker-controllable
+            // (e.g. "javascript:..." or another site), so anything else goes home.
+            try {
+                const u = new URL(back || '/', window.location.origin);
+                if (u.origin === window.location.origin) dest = u.pathname + u.search + u.hash;
+            } catch (e) { /* malformed -> home */ }
+            window.location.href = dest;
         }
     </script>
 
@@ -409,6 +415,9 @@
                 btn.style.top = `calc(50% + ${positions[i].y}px)`;
                 btn.style.transform = "translate(-50%, -50%)";
                 btn.onclick = () => addLetter(letter, btn);
+                // Don't let a clicked hex keep keyboard focus: otherwise pressing
+                // Enter submits the word AND re-"clicks" the focused hex, typing its letter again.
+                btn.addEventListener("mousedown", (e) => e.preventDefault());
                 hive.appendChild(btn);
                 hexEls.push(btn);
             });
@@ -545,8 +554,13 @@
             }
         }
 
+        // Same for the Delete / Shuffle / Enter buttons.
+        document.querySelectorAll(".ctrl-btn").forEach(b => b.addEventListener("mousedown", (e) => e.preventDefault()));
+
         document.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") { handleAction("ENTER"); return; }
+            // Leave browser/OS shortcuts (Ctrl+R, Cmd+C, Alt+Left ...) alone.
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key === "Enter") { e.preventDefault(); handleAction("ENTER"); return; }
             if (e.key === "Backspace") { handleAction("DEL"); return; }
             if (e.key === " ") { e.preventDefault(); handleAction("SHUFFLE"); return; }
             if (/^[a-zA-Z]$/.test(e.key)) {
@@ -749,6 +763,11 @@
             if (!saveTimer) saveTimer = setTimeout(() => saveProgress(), SAVE_DELAY_MS);
         }
 
+        function retrySaveLater() {
+            saveDirty = true;
+            if (!saveTimer) saveTimer = setTimeout(() => saveProgress(), 10000);
+        }
+
         function saveProgress(keepalive) {
             if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
             if (!saveDirty) return;
@@ -768,9 +787,10 @@
                 })
             }).then(r => {
                 if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+                else if (!r.ok) retrySaveLater();     // server hiccup: don't silently lose words
             }).catch(e => {
-                saveDirty = true;
                 console.error("Error saving progress:", e);
+                retrySaveLater();
             });
         }
 

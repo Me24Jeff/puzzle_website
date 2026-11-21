@@ -44,6 +44,8 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+from scraper_common import atomic_write_text
+
 BASE = "https://www.sbsolver.com"
 USER_AGENT = (
     "Mozilla/5.0 (compatible; personal-archive-bot/1.0; "
@@ -51,7 +53,7 @@ USER_AGENT = (
 )
 
 session = requests.Session()
-session.headers.update({"User-AGENT": USER_AGENT})
+session.headers.update({"User-Agent": USER_AGENT})
 
 
 class PuzzleNotFound(Exception):
@@ -132,6 +134,7 @@ def parse_puzzle(html):
         m = re.search(r"/h/([A-Za-z]+)$", a["href"])
         if m:
             answers.append(m.group(1).upper())
+    answers = list(dict.fromkeys(answers))      # a word linked twice must only count once
 
     if not answers:
         raise ValueError("no answers parsed from answers table")
@@ -160,7 +163,6 @@ def output_path(output_dir: Path, date_obj) -> Path:
 
 def save_puzzle(output_dir: Path, index: int, data: dict):
     path = output_path(output_dir, data["date"])
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "index": index,
         "date": data["date"].isoformat(),
@@ -170,8 +172,9 @@ def save_puzzle(output_dir: Path, index: int, data: dict):
         "answers": data["answers"],
         "max_points": data["max_points"],
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    # Atomic: an interrupted run must never leave a half-written file that
+    # later runs would treat as "already saved".
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
     return path
 
 
@@ -203,11 +206,17 @@ def scrape_index(output_dir: Path, index: int, overwrite: bool, delay: float,
     except PuzzleNotFound:
         print(f"[{index}] 404 not found, skipping")
         return False
+    except requests.RequestException as exc:
+        # One flaky page must not abort a multi-thousand-puzzle run.
+        print(f"[{index}] ! request failed after retries ({exc})", file=sys.stderr)
+        time.sleep(delay)
+        return False
 
     try:
         data = parse_puzzle(resp.text)
     except ValueError as exc:
         print(f"[{index}] ! failed to parse ({exc})", file=sys.stderr)
+        time.sleep(delay)
         return False
 
     path = save_puzzle(output_dir, index, data)
@@ -252,10 +261,12 @@ def main():
         if args.start is None or args.end is None:
             parser.error("either --discover, or both --start and --end, are required")
         start, end = args.start, args.end
+    if end < start:
+        parser.error("--end is before --start")
 
     index_cache = set() if args.overwrite else load_index_cache(output_dir)
 
-    ok, failed = 0, 0
+    ok, failed = 0, 0     # "ok" includes puzzles skipped because they were already saved
     for index in range(start, end + 1):
         try:
             if scrape_index(output_dir, index, args.overwrite, args.delay, index_cache):

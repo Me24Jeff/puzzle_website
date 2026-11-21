@@ -328,7 +328,14 @@
     function goBack() {
         stopVictorySound();
         const back = new URLSearchParams(window.location.search).get('back');
-        window.location.href = back ? decodeURIComponent(back) : '/';
+        let dest = '/';
+        // Only ever follow a same-origin link: ?back= is attacker-controllable
+        // (e.g. "javascript:..." or another site), so anything else goes home.
+        try {
+            const u = new URL(back || '/', window.location.origin);
+            if (u.origin === window.location.origin) dest = u.pathname + u.search + u.hash;
+        } catch (e) { /* malformed -> home */ }
+        window.location.href = dest;
     }
 
     const meta = JSON.parse(document.getElementById('puzzle-meta').textContent);
@@ -539,6 +546,7 @@
             })
         }).then(r => {
             if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+            else if (!r.ok) dirty = true;      // server hiccup: the next tick/flush retries
         }).catch(e => { dirty = true; console.error('Error saving progress:', e); });
     }
 
@@ -941,7 +949,16 @@
         lists.across.concat(lists.down).forEach(c => { numberMap[cellKey(c.col, c.row)] = c.number; });
 
         userGrid = Array.from({ length: puzzle.height }, () => Array(puzzle.width).fill(null));
-        if (Array.isArray(saved.userGrid) && saved.userGrid.length === puzzle.height) userGrid = saved.userGrid;
+        if (Array.isArray(saved.userGrid) && saved.userGrid.length === puzzle.height) {
+            // Normalise whatever was saved: every row must be an array of the right
+            // width, and legacy entries (bare strings) become { letter, ... } objects,
+            // so a malformed row can't crash rendering.
+            userGrid = saved.userGrid.map(row => Array.from({ length: puzzle.width }, (_, x) => {
+                const e = Array.isArray(row) ? row[x] : null;
+                if (typeof e === 'string') return e ? { letter: e, pencil: false, verified: false } : null;
+                return (e && typeof e.letter === 'string' && e.letter) ? e : null;
+            }));
+        }
         if (saved.timerSeconds) timerSeconds = saved.timerSeconds;
         if (saved.usedCheck) usedCheck = saved.usedCheck;
         if (saved.completed) puzzleFinished = saved.completed;

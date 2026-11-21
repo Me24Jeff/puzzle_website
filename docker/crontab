@@ -1,11 +1,13 @@
 # crossword-app scraper schedule
-# All times are in the container's TZ (see docker-compose.yml -> TZ=America/New_York),
-# since that's the timezone NYT actually resets puzzles in.
+# Installed with `crontab` (see Dockerfile) as root's user crontab, so there is
+# NO "user" column. All times are in the container's TZ (see docker-compose.yml
+# -> TZ=America/New_York), since that's the timezone NYT actually resets
+# puzzles in.
 #
-# min  hour  dom  month  dow  user  command
+# min  hour  dom  month  dow  command
 
-# Wordle flips at midnight local time (which is around 5pm ET)
-# Run at 17:10 to give their systems a few minutes of buffer.
+# Wordle: fetch tomorrow's word at 18:10 ET (the scripts ask for "tomorrow",
+# so this is comfortably after NYT has published it).
 10  18  *  *  *  /app/scripts/wordle_daily.sh >> /app/data/logs/cron.log 2>&1
 
 # Crosswords:

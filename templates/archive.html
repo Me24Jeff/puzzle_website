@@ -214,20 +214,22 @@
         function beeRankIndexFromRatio(ratio) {
             let idx = 0;
             for (let i = 0; i < BEE_RANK_PCTS.length; i++) {
-                if (ratio >= BEE_RANK_PCTS[i]) idx = i;
+                if (ratio >= BEE_RANK_PCTS[i] - 1e-9) idx = i;
             }
             return idx;
         }
         // Maps a rank index (0-9) to one of the 9 progress-N.svg files
-        // (0 = not started, 8 = Queen Bee). Beginner/Good Start share an
-        // image, as do Moving Up/Good and Nice/Great.
+        // (0 = not started, 8 = Queen Bee). Two pairs of ranks share an
+        // image - Beginner/Good Start and Moving Up/Good - which uses up
+        // icons 1-8 exactly. (Keep in sync with index.html.)
         function beeProgressImageIndex(rankIdx) {
             if (rankIdx <= 1) return 1;
             if (rankIdx <= 3) return 2;
             if (rankIdx === 4) return 3;
-            if (rankIdx <= 6) return 4;
-            if (rankIdx === 7) return 5;
-            if (rankIdx === 8) return 6;
+            if (rankIdx === 5) return 4;
+            if (rankIdx === 6) return 5;
+            if (rankIdx === 7) return 6;
+            if (rankIdx === 8) return 7;
             return 8; // Queen Bee
         }
 
@@ -252,8 +254,13 @@
             const params = new URLSearchParams(window.location.search);
             const y = parseInt(params.get('y'), 10);
             const m = parseInt(params.get('m'), 10);
-            if (!isNaN(y) && !isNaN(m)) {
-                currentDate = new Date(y, m, 1);
+            // Ignore junk / out-of-range values (?y=99999&m=-5 used to give an
+            // "Invalid Date") and never start on a month that hasn't happened yet.
+            const now = new Date();
+            if (Number.isInteger(y) && Number.isInteger(m) && y >= 1900 && m >= 0 && m <= 11) {
+                const requested = new Date(y, m, 1);
+                const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                currentDate = requested > thisMonth ? thisMonth : requested;
             }
         })();
 

@@ -8,7 +8,10 @@ services:
     environment:
       TZ: Asia/Jerusalem
       COOKIE_SECURE: 1
-      FLASK_SECRET_KEY: a65cb14fb41dd3022ee2827ad9d71e164a29d222a679ad99cc77677c8444ed45
+      # Secrets live in ./.env (git-ignored, see .env.example) - never put real
+      # values in this file. If FLASK_SECRET_KEY is empty the app generates a
+      # key once and keeps it in the data folder.
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-}
       PYTHONPATH: /app
       ADMIN_USERNAMES: jonathan
     volumes:
@@ -19,6 +22,12 @@ services:
       --workers 2
       --timeout 60
       --preload
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5235/login', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     networks:
      - reverse-proxy
 
@@ -32,7 +41,8 @@ services:
       TZ: America/New_York
       # NYT-S session cookie, required for daily/mini/midi crosswords (NOT
       # needed for Wordle or Spelling Bee scrapers - those are free).
-      NYT_S_COOKIE: 0^CCESMgjEp9fMBhCk0MrVBhoSMS2yxArB1_fM8vEoZkWwBE2fII-Hu5ABKgIAAjiErdzLBkIAGkDlUQWzrfCMe-8-ERshjlQmqAQ20TvoclmRS3UGJ6ubLHNZtbie746l1TO0yU0I_5U3vGAIFjFfqxIjWAZleaIA
+      # Set it in ./.env (see .env.example), not here.
+      NYT_S_COOKIE: ${NYT_S_COOKIE:-}
     volumes:
       - /opt/appdata/crossword:/app/data
     # Default CMD from the Dockerfile (cron-entrypoint.sh) runs cron in the

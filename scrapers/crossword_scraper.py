@@ -66,6 +66,9 @@ import time
 from datetime import date, datetime, timedelta
 
 import requests
+from zoneinfo import ZoneInfo
+
+from scraper_common import atomic_write_text, get_with_retries
 
 # --------------------------------------------------------------------------
 # Config matching app.py's TYPE_FOLDER_CONFIG
@@ -128,7 +131,7 @@ def build_session(nyt_s_cookie):
 # --------------------------------------------------------------------------
 def get_puzzle_from_id(session, puzzle_id):
     puzzle_url = f"https://www.nytimes.com/svc/crosswords/v6/puzzle/{puzzle_id}.json"
-    r = session.get(puzzle_url, timeout=20)
+    r = get_with_retries(session, puzzle_url)
     r.raise_for_status()
     new_format = r.json()
 
@@ -144,7 +147,7 @@ def get_puzzle_from_id(session, puzzle_id):
 
 
 def get_puzzle(session, url):
-    r = session.get(url, timeout=20)
+    r = get_with_retries(session, url)
     r.raise_for_status()
     page = r.text
 
@@ -164,7 +167,7 @@ def get_puzzle(session, url):
         raise RuntimeError("Found window.gameData but no 'filename' field in it.")
 
     meta_url = f"https://www.nytimes.com/svc/crosswords/v6/puzzle/{filename}.json"
-    r2 = session.get(meta_url, timeout=20)
+    r2 = get_with_retries(session, meta_url)
     r2.raise_for_status()
     metadata = r2.json()
     if "id" not in metadata:
@@ -186,6 +189,17 @@ def _clue_text(clues_lookup, idx):
     if isinstance(t, dict):
         t = t.get("plain", "")
     return html.unescape(t or "")
+
+
+def check_puzzle_sanity(grid, across, down):
+    """Refuse to save something that isn't a playable puzzle. A bad file would
+    be treated as "already saved" by every later run and never re-fetched, so
+    it's better to fail now and retry tomorrow."""
+    letters = [c for row in grid for c in row if not c["block"]]
+    if not letters or any(not c.get("solution") for c in letters):
+        raise ValueError("puzzle has no solution letters for some cells (NYT-S cookie expired, or layout changed?)")
+    if not across or not down:
+        raise ValueError(f"puzzle came out with {len(across)} across / {len(down)} down clues")
 
 
 def convert_to_app_json(raw, fallback_title):
@@ -276,9 +290,11 @@ def convert_to_app_json(raw, fallback_title):
     down.sort(key=lambda c: c["number"])
 
     constructors = meta.get("constructors", [])
-    author = ", ".join(constructors) if constructors else ""
+    author = ", ".join(str(c) for c in constructors) if constructors else ""
     if meta.get("editor"):
         author = f"{author} / {meta['editor']}" if author else meta["editor"]
+
+    check_puzzle_sanity(grid, across, down)
 
     return {
         "title": meta.get("title") or fallback_title,
@@ -317,12 +333,10 @@ def scrape_one(session, puzzle_type, target_date, output_dir, force=False):
         fallback_title = f"The {target_date.strftime('%A')} {puzzle_type.title()}"
         data = convert_to_app_json(raw, fallback_title)
     except Exception as e:
-        print(f"  [fail] {puzzle_type:5s} {target_date} - {e}")
+        print(f"  [fail] {puzzle_type:5s} {target_date} - {type(e).__name__}: {e}")
         return False
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    atomic_write_text(out_path, json.dumps(data))
     print(f"  [ok]   {puzzle_type:5s} {target_date} -> {out_path}")
     return True
 
@@ -352,12 +366,21 @@ def main():
 
     types = list(TYPE_CONFIG.keys()) if args.type == "all" else [args.type]
 
+    def parse_day(value, flag):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            parser.error(f"{flag} must be YYYY-MM-DD, got {value!r}")
+
+    # NYT publishes on US/Eastern time, so "today" means Eastern, not the server's zone.
+    today = datetime.now(ZoneInfo("America/New_York")).date()
     if args.start_date:
-        start = date.fromisoformat(args.start_date)
-        end = date.fromisoformat(args.end_date) if args.end_date else date.today()
+        start = parse_day(args.start_date, "--start-date")
+        end = parse_day(args.end_date, "--end-date") if args.end_date else today
+        if end < start:
+            parser.error("--end-date is before --start-date")
     else:
-        single = date.fromisoformat(args.date) if args.date else date.today()
-        start = end = single
+        start = end = parse_day(args.date, "--date") if args.date else today
 
     try:
         cookie = load_cookie(args.cookie, args.cookie_file)

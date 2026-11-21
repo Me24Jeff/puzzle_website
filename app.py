@@ -4,9 +4,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 from functools import lru_cache
-import os, gzip, json, sqlite3, time, hashlib, secrets, math
+import os, gzip, json, sqlite3, time, hashlib, secrets, math, re
+from collections import deque
 
 app = Flask(__name__, static_folder="/app/data/static", static_url_path="/static")
+
+# Nothing the site sends needs more than a few hundred KB (the biggest body is
+# a saved crossword grid), so refuse anything bigger before it is even parsed.
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Secret key + session/cookie configuration
@@ -131,6 +136,100 @@ TYPE_FOLDER_CONFIG = {
 
 for _d in (PUZZLE_DIR, CROSSWORD_FALLBACK_DIR, SPELLING_BEE_DIR):
     os.makedirs(_d, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Input validation helpers
+# ---------------------------------------------------------------------------
+USERNAME_MAX_LEN = 32
+PASSWORD_MIN_LEN = 6
+PASSWORD_MAX_LEN = 128      # scrypt cost grows with input size; don't hash megabytes
+AVATAR_MAX_LEN = 16         # a few emoji (ZWJ sequences are long-ish), never a paragraph
+PROGRESS_GRID_MAX_BYTES = 512 * 1024
+
+# Publisher / day-key / year / month as they appear in URLs and in the
+# progress table. Deliberately has no "/", "\" or leading "." so a value can
+# never walk out of a folder when it is used to build a file path.
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _&'-]{0,63}$")
+_SAFE_DAY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+_YEAR_RE = re.compile(r"^\d{4}$")
+_MONTH_RE = re.compile(r"^(0[1-9]|1[0-2])$")
+
+
+def json_body():
+    """The request's JSON object, or {} if the body is missing / not an object."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def str_field(data, key, default=''):
+    """data[key] if it is a string, else `default` (never raises on odd JSON types)."""
+    v = data.get(key, default)
+    return v if isinstance(v, str) else default
+
+
+def valid_username(name):
+    """Returns an error message, or None if the username is fine."""
+    if not name:
+        return 'Username cannot be empty'
+    if len(name) > USERNAME_MAX_LEN:
+        return f'Username must be at most {USERNAME_MAX_LEN} characters'
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        return 'Username contains invalid characters'
+    return None
+
+
+def valid_password(pw):
+    if len(pw) < PASSWORD_MIN_LEN:
+        return f'Password must be at least {PASSWORD_MIN_LEN} characters'
+    if len(pw) > PASSWORD_MAX_LEN:
+        return f'Password must be at most {PASSWORD_MAX_LEN} characters'
+    return None
+
+
+def valid_progress_key(publisher, year, month, day_key):
+    return bool(_SAFE_NAME_RE.match(publisher) and _YEAR_RE.match(year)
+                and _MONTH_RE.match(month) and _SAFE_DAY_KEY_RE.match(day_key))
+
+
+# --- Login throttling --------------------------------------------------------
+# A small in-memory brake on password guessing: after LOGIN_MAX_FAILURES wrong
+# passwords for one username within LOGIN_WINDOW_SECONDS, further attempts for
+# that username are refused until the window slides past. (Per gunicorn worker,
+# which is plenty to turn "thousands of guesses a minute" into a trickle.)
+LOGIN_MAX_FAILURES = 10
+LOGIN_WINDOW_SECONDS = 10 * 60
+_login_failures = {}          # lower-cased username -> deque of failure timestamps
+
+
+def _recent_failures(key, now):
+    q = _login_failures.get(key)
+    if not q:
+        return 0
+    while q and now - q[0] > LOGIN_WINDOW_SECONDS:
+        q.popleft()
+    if not q:
+        _login_failures.pop(key, None)
+        return 0
+    return len(q)
+
+
+def login_throttled(username):
+    return _recent_failures(username.lower(), time.time()) >= LOGIN_MAX_FAILURES
+
+
+def note_login_failure(username):
+    now = time.time()
+    if len(_login_failures) > 5000:          # bound memory against username-spraying
+        for k in list(_login_failures):
+            _recent_failures(k, now)
+        if len(_login_failures) > 5000:
+            _login_failures.clear()
+    _login_failures.setdefault(username.lower(), deque()).append(now)
+
+
+def clear_login_failures(username):
+    _login_failures.pop(username.lower(), None)
 
 
 # ---------------------------------------------------------------------------
@@ -395,9 +494,12 @@ def build_puzzle_json(name, puz_data):
     }
 
 
+DEFAULT_CROSSWORD_BLURB = "Crack the clues in today's puzzle."
+
+
 def get_puzzle_title(puz_data):
     meta = puz_data[6] if len(puz_data) > 6 else {}
-    return meta.get("title") or "Crack the clues in today's puzzle."
+    return meta.get("title") or DEFAULT_CROSSWORD_BLURB
 
 
 @lru_cache(maxsize=256)
@@ -430,18 +532,34 @@ def _master_title(publisher, year, month, day_key):
 # --- Fallback folder helpers (scraped puzzles not in the master archive) ---
 
 def fallback_puzzle_path(publisher, year, month, day_key):
-    return os.path.join(
+    """Path of a scraped puzzle's JSON file. publisher/year/month/day_key come
+    straight from the URL, so they are validated hard: anything that could
+    escape CROSSWORD_FALLBACK_DIR (".." or slashes) raises ValueError."""
+    if not (_SAFE_NAME_RE.match(str(publisher)) and _SAFE_DAY_KEY_RE.match(str(day_key))):
+        raise ValueError("invalid puzzle reference")
+    path = os.path.join(
         CROSSWORD_FALLBACK_DIR, publisher, str(int(year)), f"{int(month):02d}", f"{day_key}.json"
     )
+    # Belt and braces: whatever the regexes allowed, the resolved file must
+    # still live inside the fallback folder.
+    root = os.path.realpath(CROSSWORD_FALLBACK_DIR)
+    if os.path.commonpath([root, os.path.realpath(path)]) != root:
+        raise ValueError("invalid puzzle reference")
+    return path
 
 
 def load_fallback_puzzle_json(publisher, year, month, day_key):
     """Returns the pre-built puzzle JSON for a scraped puzzle, or None if
-    there isn't one on disk for this publisher/year/month/day_key."""
-    path = fallback_puzzle_path(publisher, year, month, day_key)
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+    there isn't one on disk (or the reference / file is invalid)."""
+    try:
+        path = fallback_puzzle_path(publisher, year, month, day_key)
+        if os.path.isfile(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+    except (ValueError, OSError):
+        # ValueError covers bad references AND a corrupt/partial JSON file.
+        return None
     return None
 
 
@@ -594,9 +712,16 @@ def optimize_response(resp):
     if request.endpoint in _NO_SESSION_ENDPOINTS:
         return resp
 
+    # Cheap hardening headers for every page / API response.
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    resp.headers.setdefault('Referrer-Policy', 'same-origin')
+
     # HTML pages have per-user data (progress, name, ...) baked in, so they
     # must never come back from the HTTP cache (e.g. on the back button).
-    if resp.mimetype == 'text/html':
+    # The same goes for JSON API answers (progress, leaderboard, stats, ...);
+    # endpoints that really are cacheable set their own Cache-Control first.
+    if resp.mimetype in ('text/html', 'application/json'):
         resp.headers.setdefault('Cache-Control', 'private, no-store')
 
     # gzip text responses (HTML, JSON, the Wordle dictionary...).
@@ -642,12 +767,15 @@ def login_page():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.get_json(silent=True) or {}
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    data = json_body()
+    username = str_field(data, 'username').strip()
+    password = str_field(data, 'password')
 
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
+    err = valid_username(username) or valid_password(password)
+    if err:
+        return jsonify({'error': err}), 400
 
     hashed = generate_password_hash(password)
     try:
@@ -668,9 +796,14 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json(silent=True) or {}
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    data = json_body()
+    username = str_field(data, 'username').strip()
+    password = str_field(data, 'password')
+
+    if login_throttled(username):
+        return jsonify({'error': 'Too many failed attempts. Please wait a few minutes and try again.'}), 429
+    if len(password) > PASSWORD_MAX_LEN:     # can't be a real password; don't spend a scrypt run on it
+        return jsonify({'error': 'Invalid username or password'}), 401
 
     with db() as conn:
         # Case-insensitive query for username
@@ -680,8 +813,10 @@ def login():
         ).fetchone()
 
     if user and check_password_hash(user[2], password):
+        clear_login_failures(username)
         _log_in(user[0])
         return jsonify({'status': 'success'})
+    note_login_failure(username)
     return jsonify({'error': 'Invalid username or password'}), 401
 
 
@@ -690,11 +825,12 @@ def change_username():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.get_json(silent=True) or {}
-    new_username = data.get('username', '').strip()
+    data = json_body()
+    new_username = str_field(data, 'username').strip()
 
-    if not new_username:
-        return jsonify({'error': 'Username cannot be empty'}), 400
+    err = valid_username(new_username)
+    if err:
+        return jsonify({'error': err}), 400
 
     user_id = session['user_id']
     with db() as conn:
@@ -712,14 +848,19 @@ def change_password():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.get_json(silent=True) or {}
-    current = data.get('currentPassword', '')
-    new = data.get('newPassword', '')
+    data = json_body()
+    current = str_field(data, 'currentPassword')
+    new = str_field(data, 'newPassword')
 
     if not current or not new:
         return jsonify({'error': 'Current and new password are required'}), 400
     if new == current:
         return jsonify({'error': 'New password must be different from the current one'}), 400
+    err = valid_password(new)
+    if err:
+        return jsonify({'error': err}), 400
+    if len(current) > PASSWORD_MAX_LEN:
+        return jsonify({'error': 'Current password is incorrect'}), 400
 
     user_id = session['user_id']
     with db() as conn:
@@ -760,10 +901,10 @@ def admin_reset_password():
     if not is_admin(admin_id):
         return jsonify({'error': 'Forbidden'}), 403
 
-    data = request.get_json(silent=True) or {}
+    data = json_body()
     try:
         target_id = int(data.get('userId'))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return jsonify({'error': 'Invalid user'}), 400
     if target_id == admin_id:
         return jsonify({'error': "Use 'Change Password' for your own account"}), 400
@@ -807,8 +948,13 @@ def change_avatar():
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data = request.get_json(silent=True) or {}
-    avatar = data.get('avatar', '🧩')
+    data = json_body()
+    avatar = str_field(data, 'avatar', '🧩').strip()
+    # The avatar is shown to every user, so keep it to a short plain string
+    # (an emoji) - no markup, no control characters, no essays.
+    if (not avatar or len(avatar) > AVATAR_MAX_LEN
+            or any(ch in '<>&"\'`' or ord(ch) < 32 or ord(ch) == 127 for ch in avatar)):
+        return jsonify({'error': 'Invalid avatar'}), 400
     user_id = session['user_id']
 
     with db() as conn:
@@ -845,11 +991,19 @@ def get_friends_leaderboard():
         # who haven't played (NULL) last.
         order_by = '''CASE WHEN p.timer_seconds IS NULL THEN 1 ELSE 0 END,
                 p.timer_seconds DESC,
-                u.username ASC'''
+                u.username COLLATE NOCASE ASC'''
     else:
-        order_by = '''CASE WHEN p.completed = 1 THEN 1 ELSE 2 END,
-                p.timer_seconds ASC,
-                u.username ASC'''
+        # Finished solves first (fastest first), then people still working on
+        # it (furthest along first), then people who haven't started. (In
+        # SQLite NULLs sort *first* for ASC, which used to put people who hadn't
+        # started above those who had.) Wordle's richer win/loss ordering is
+        # applied by the dashboard.
+        order_by = '''CASE WHEN p.completed = 1 THEN 0
+                     WHEN p.timer_seconds IS NOT NULL THEN 1
+                     ELSE 2 END,
+                CASE WHEN p.completed = 1 THEN p.timer_seconds END ASC,
+                p.ratio DESC,
+                u.username COLLATE NOCASE ASC'''
 
     with db() as conn:
         rows = conn.execute(f'''
@@ -955,9 +1109,13 @@ def get_user_stats():
                     if isinstance(g, dict) and g.get('hard'):
                         wordle_hard_wins += 1
                     wordle_wins += 1
-                    if secs is not None and 1 <= secs <= WORDLE_MAX_GUESSES:
-                        wordle_win_guesses.append(secs)
-                        wordle_dist[str(secs)] += 1
+                    try:
+                        guesses = int(secs)
+                    except (TypeError, ValueError, OverflowError):
+                        guesses = 0
+                    if 1 <= guesses <= WORDLE_MAX_GUESSES:
+                        wordle_win_guesses.append(guesses)
+                        wordle_dist[str(guesses)] += 1
             continue
 
         if publisher == SPELLING_BEE_PUBLISHER:
@@ -1004,11 +1162,15 @@ def get_user_stats():
             kind = 'normal'
         bucket = xw[kind]
         if completed or (ratio or 0) > 0:
-            if not used_check:
-                bucket['gold'] += 1
             bucket['played'] += 1
         if completed:
             bucket['solved'] += 1
+            # "Gold" = solved without any checking. It must only be counted for
+            # *solved* puzzles: it used to count every started-but-unsolved
+            # puzzle too, so the "no autocheck" rate (gold / solved) could
+            # exceed 100%.
+            if not used_check:
+                bucket['gold'] += 1
             if secs and secs > 0:
                 bucket['times'].append(secs)
                 if kind == 'normal':
@@ -1075,9 +1237,23 @@ def handle_puzzle_progress(publisher, year, month, day_key):
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
+    if not valid_progress_key(publisher, year, month, day_key):
+        return jsonify({'error': 'Invalid puzzle reference'}), 400
+
     user_id = session['user_id']
     if request.method == 'POST':
-        data = request.get_json(silent=True) or {}
+        data = json_body()
+        try:
+            grid_json = json.dumps(data.get('userGrid', []), separators=(',', ':'))
+            timer_seconds = int(max(0, min(float(data.get('timerSeconds', 0) or 0), 10_000_000)))
+            ratio = float(data.get('ratio', 0.0) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            return jsonify({'error': 'Invalid progress data'}), 400
+        if len(grid_json) > PROGRESS_GRID_MAX_BYTES:
+            return jsonify({'error': 'Progress data too large'}), 413
+        if not math.isfinite(ratio):
+            return jsonify({'error': 'Invalid progress data'}), 400
+        ratio = max(0.0, min(ratio, 1.0))
         with db() as conn:
             conn.execute('''
                 INSERT INTO progress (user_id, publisher, year, month, day_key, user_grid, timer_seconds, ratio, completed, used_check, auto_check)
@@ -1091,9 +1267,9 @@ def handle_puzzle_progress(publisher, year, month, day_key):
                     auto_check = excluded.auto_check
             ''', (
                 user_id, publisher, year, month, day_key,
-                json.dumps(data.get('userGrid', [])),
-                data.get('timerSeconds', 0),
-                data.get('ratio', 0.0),
+                grid_json,
+                timer_seconds,
+                ratio,
                 1 if data.get('completed') else 0,
                 1 if data.get('usedCheck') else 0,
                 1 if data.get('autoCheck') else 0
@@ -1268,7 +1444,12 @@ def build_archive_bundle(user_id, type_folder, year, month):
     suffix = config['suffix']
     publisher = config['publisher']
     year = int(year)
-    month_padded = f"{int(month):02d}"
+    month = int(month)
+    # Out-of-range values (month 13, year 99999999999, ...) are a client error,
+    # not something to run queries / directory scans for.
+    if not (1 <= month <= 12 and 1800 <= year <= datetime.now().year + 1):
+        raise ValueError("date out of range")
+    month_padded = f"{month:02d}"
 
     progress = {}
     with db() as conn:
@@ -1316,7 +1497,7 @@ def build_archive_bundle(user_id, type_folder, year, month):
     return {
         'type': type_folder,
         'year': year,
-        'month': int(month),
+        'month': month,
         'progress': progress,
         'availableDays': available_days,
         'range': get_archive_range_info(type_folder),
@@ -1425,7 +1606,7 @@ def index():
         day_key = day_base + cfg['suffix']
         publisher = cfg['publisher']
         found = False
-        title_text = "Crack the clues in today's puzzle."
+        title_text = DEFAULT_CROSSWORD_BLURB
         try:
             title_text = f"“{_master_title(publisher, year, month, day_key)}”"
             found = True
@@ -1435,7 +1616,7 @@ def index():
             except Exception:
                 fallback = None
             if fallback is not None:
-                title_text = f"“{fallback.get('title') or 'Crack the clues in todays puzzle.'}”"
+                title_text = f"“{fallback.get('title') or DEFAULT_CROSSWORD_BLURB}”"
                 found = True
 
         today_available[p_type] = found
@@ -1466,8 +1647,9 @@ def play_puzzle(publisher, year, month, day_key):
     try:
         puzzle, _ = load_puzzle(publisher, year, month, day_key)
         error = None if puzzle is not None else f"No puzzle found for {publisher}/{year}/{month}/{day_key}"
-    except Exception as e:
-        puzzle, error = None, str(e)
+    except Exception:
+        app.logger.exception("Failed to load puzzle %s/%s/%s/%s", publisher, year, month, day_key)
+        puzzle, error = None, "Could not load that puzzle"
 
     if puzzle is None:
         boot = {'error': error}
@@ -1501,7 +1683,9 @@ def play_wordle(year, month, day):
     except ValueError:
         return "Invalid date", 400
 
-    month_p, day_p = f"{int(month):02d}", f"{int(day):02d}"
+    # Canonical, zero-padded keys: "/wordle/2026/9/5" and "/wordle/2026/09/05"
+    # are the same day and must share one saved-progress row.
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
     word = get_wordle_word_for_date(target_date)
     if word is None:
         return render_template('wordle.html', target_word='', word_unavailable=True,
@@ -1529,17 +1713,31 @@ def wordle_valid_words():
 # ---------------------------------------------------------------------------
 # Spelling Bee Routes
 # ---------------------------------------------------------------------------
+@lru_cache(maxsize=512)
+def _read_bee_file(path, mtime_ns):
+    # mtime is part of the cache key, so a re-scraped puzzle is picked up
+    # immediately while stats pages stop re-reading hundreds of files.
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return data if isinstance(data, dict) else None
+
+
 def get_spelling_bee_puzzle(target_date: date):
     """Loads puzzles/spelling-bee/<year>/<month>/<day>.json for a given date,
-    or None if that day doesn't have a puzzle on disk."""
+    or None if that day doesn't have a (readable) puzzle on disk."""
     path = os.path.join(
         SPELLING_BEE_DIR, str(target_date.year),
         f"{target_date.month:02d}", f"{target_date.day:02d}.json"
     )
-    if not os.path.exists(path):
+    try:
+        mtime_ns = os.stat(path).st_mtime_ns
+        data = _read_bee_file(path, mtime_ns)
+    except (OSError, ValueError):
+        return None      # missing, unreadable, or a corrupt/partial JSON file
+    if not data or not all(k in data for k in ('center_letter', 'outer_letters', 'answers', 'max_points')):
         return None
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    # Callers get their own copy so nobody can mutate the cached one.
+    return json.loads(json.dumps(data))
 
 
 @app.route('/spelling-bee')
@@ -1560,7 +1758,7 @@ def play_spelling_bee(year, month, day):
     except ValueError:
         return "Invalid date", 400
 
-    month_p, day_p = f"{int(month):02d}", f"{int(day):02d}"
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
     puzzle = get_spelling_bee_puzzle(target_date)
     if puzzle is None:
         return render_template('spelling-bee.html', puzzle_unavailable=True,
@@ -1576,24 +1774,32 @@ def play_spelling_bee(year, month, day):
 # ---------------------------------------------------------------------------
 @app.route('/api/puzzles-list')
 def puzzles_list():
+    # These two used to be open to the whole internet (no login), which let
+    # anyone download the entire puzzle archive. Like every other route, they
+    # now need a logged-in session.
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
     resp = jsonify(get_master_index())
-    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    resp.headers['Cache-Control'] = 'private, max-age=3600'
     return resp
 
 
 @app.route('/api/puzzle-json/<publisher>/<year>/<month>/<path:day_key>')
 def get_puzzle_json(publisher, year, month, day_key):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
     try:
         puzzle, immutable = load_puzzle(publisher, year, month, day_key)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("Failed to load puzzle %s/%s/%s/%s", publisher, year, month, day_key)
+        return jsonify({"error": "Could not load that puzzle"}), 500
 
     if puzzle is None:
-        return jsonify({"error": f"No puzzle found for {publisher}/{year}/{month}/{day_key}"}), 404
+        return jsonify({"error": "No puzzle found for that date"}), 404
 
     resp = jsonify(puzzle)
     if immutable:
-        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        resp.headers['Cache-Control'] = 'private, max-age=86400'
     return resp
 
 
@@ -1602,12 +1808,20 @@ def _warm_caches():
     for fn in (get_master_index, get_valid_wordle_words_text):
         try:
             fn()
-        except Exception:
-            pass
+        except Exception as e:
+            # Not fatal (they load lazily on first use), but say so in the log
+            # instead of failing silently.
+            print(f"[startup] could not preload {fn.__name__}: {e}", flush=True)
 
 
 _warm_caches()
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5235)
+    # Local development only (production runs under gunicorn). The Werkzeug
+    # debugger allows arbitrary code execution, so it is opt-in and the server
+    # only listens on localhost unless you explicitly say otherwise:
+    #   FLASK_DEBUG=1 python app.py          # debugger on
+    #   FLASK_HOST=0.0.0.0 python app.py     # reachable from other machines
+    app.run(debug=os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes'),
+            host=os.environ.get('FLASK_HOST', '127.0.0.1'), port=5235)

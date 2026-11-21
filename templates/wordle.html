@@ -275,9 +275,15 @@
 
     <script>
         function goBack() {
-            const params = new URLSearchParams(window.location.search);
-            const back = params.get('back');
-            window.location.href = back ? decodeURIComponent(back) : '/';
+            const back = new URLSearchParams(window.location.search).get('back');
+            let dest = '/';
+            // Only ever follow a same-origin link: ?back= is attacker-controllable
+            // (e.g. "javascript:..." or another site), so anything else goes home.
+            try {
+                const u = new URL(back || '/', window.location.origin);
+                if (u.origin === window.location.origin) dest = u.pathname + u.search + u.hash;
+            } catch (e) { /* malformed -> home */ }
+            window.location.href = dest;
         }
     </script>
 
@@ -286,7 +292,7 @@
         const meta = JSON.parse(document.getElementById('wordle-meta').textContent);
         // This user's saved guesses for the day, embedded by the server (no fetch needed).
         const SAVED = {{ (saved or {}) | tojson }};
-        const TARGET = "{{ target_word }}";
+        const TARGET = {{ target_word | tojson }};
         const WORD_LENGTH = TARGET.length;
         const MAX_ATTEMPTS = {{ max_guesses }};
 
@@ -299,6 +305,7 @@
         let currentGuessLetters = Array(WORD_LENGTH).fill("");
         let gameOver = false;
         let isWon = false;
+        let busy = false;          // true while a submitted guess is still flipping; blocks all input
 
         // --- Valid guess dictionary (fetched once, cached in memory) ---
         let VALID_WORDS = null;
@@ -355,13 +362,18 @@
                 btn.textContent = key === "DEL" ? "⌫" : key;
                 btn.dataset.key = key;
                 btn.onclick = () => handleKey(key);
+                // Keep focus off the on-screen keys: a focused key would be
+                // "clicked" again by the physical Enter/Space key and type its letter.
+                btn.addEventListener("mousedown", (e) => e.preventDefault());
                 container.appendChild(btn);
             });
         });
 
         document.addEventListener("keydown", (e) => {
             if (gameOver) return;
-            if (e.key === "Enter") handleKey("ENTER");
+            // Leave browser/OS shortcuts (Ctrl+R, Cmd+C, Alt+Left ...) alone.
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key === "Enter") { e.preventDefault(); handleKey("ENTER"); }
             else if (e.key === "Backspace") handleKey("DEL");
             else if (/^[a-zA-Z]$/.test(e.key)) handleKey(e.key.toUpperCase());
         });
@@ -464,6 +476,7 @@
                 })
             }).then(r => {
                 if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+                else if (!r.ok) showToast('Could not save progress - check your connection.');
             }).catch(e => console.error("Error saving progress:", e));
         }
 
@@ -510,7 +523,7 @@
         }
 
         function handleKey(key) {
-            if (gameOver) return;
+            if (gameOver || busy) return;
 
             if (key === "DEL") {
                 if (currentTile > 0) {
@@ -560,6 +573,7 @@
             }
 
             const result = computeResult(guess);
+            busy = true;   // until the flip finishes: no typing, deleting or re-submitting (a 2nd Enter used to count the guess twice)
 
             const STAGGER_DELAY = 250;
             const FLIP_DURATION = 800;
@@ -581,6 +595,7 @@
                 guesses.push(guess);
                 results.push(result);
                 updateGuessCounter();
+                busy = false;
 
                 if (guess === TARGET) {
                     finishGame(true);
@@ -628,6 +643,11 @@
             if (saved && saved.userGrid && saved.userGrid.guesses) {
                 guesses = saved.userGrid.guesses;
                 results = saved.userGrid.results || [];
+                // Rebuild any missing/short result rows from the guess itself, so a
+                // partially saved game still renders instead of throwing.
+                guesses = guesses.filter(g => typeof g === 'string' && g.length === WORD_LENGTH);
+                results = guesses.map((g, idx) => Array.isArray(results[idx]) && results[idx].length === WORD_LENGTH
+                    ? results[idx] : computeResult(g));
                 guesses.forEach((g, idx) => renderSavedRow(idx, g, results[idx]));
                 currentRow = guesses.length;
                 currentTile = 0;

@@ -7,6 +7,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends cron git rsync tzdata \
     && rm -rf /var/lib/apt/lists/*
 
+# Unbuffered output so scraper/gunicorn lines show up in `docker logs` and
+# cron.log immediately and in order; no .pyc files written into the image.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -17,13 +22,15 @@ COPY sw.js .
 COPY templates/ templates/
 COPY scrapers/ scrapers/
 COPY scripts/ scripts/
-COPY docker/crontab /etc/cron.d/crossword-cron
+COPY docker/crontab /app/crontab
 COPY docker/cron-entrypoint.sh /usr/local/bin/cron-entrypoint.sh
 
-RUN chmod 0644 /etc/cron.d/crossword-cron \
-    && chmod +x /usr/local/bin/cron-entrypoint.sh \
+# The schedule is installed as root's *user* crontab (`crontab <file>`), which
+# has no "user" column. It deliberately does NOT live in /etc/cron.d, where
+# every line would need a user name and these lines would be rejected.
+RUN chmod +x /usr/local/bin/cron-entrypoint.sh \
     && chmod +x scripts/*.sh \
-    && crontab /etc/cron.d/crossword-cron
+    && crontab /app/crontab
 
 # Both services run from this image. The "web" service overrides CMD with
 # gunicorn; the "scraper" service uses this default (cron in the foreground).

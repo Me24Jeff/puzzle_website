@@ -440,6 +440,7 @@
             }
         }
 
+        let leaderboardRequestId = 0;
         async function loadLeaderboard() {
             const dateInput = document.getElementById('friends-date-picker');
 
@@ -453,7 +454,11 @@
             const container = document.getElementById('leaderboard-list');
             container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">Loading leaderboard...</div>';
 
-            let users = await fetchJsonCached(`/api/friends/leaderboard?type=${currentFriendsSubTab}&date=${dateVal}`, 20000);
+            // If the tab/date changes while this request is in flight, drop the
+            // stale answer instead of letting it overwrite the newer leaderboard.
+            const myRequest = ++leaderboardRequestId;
+            let users = await fetchJsonCached(`/api/friends/leaderboard?type=${encodeURIComponent(currentFriendsSubTab)}&date=${encodeURIComponent(dateVal)}`, 20000);
+            if (myRequest !== leaderboardRequestId) return;
             if (users === null) {
                 container.innerHTML = '<div class="text-center text-red-500 dark:text-red-400 py-4 text-sm">Failed to load leaderboard</div>';
                 return;
@@ -853,13 +858,14 @@
         function beeRankIndexFromRatio(ratio) {
             let idx = 0;
             for (let i = 0; i < BEE_RANK_PCTS.length; i++) {
-                if (ratio >= BEE_RANK_PCTS[i]) idx = i;
+                if (ratio >= BEE_RANK_PCTS[i] - 1e-9) idx = i;
             }
             return idx;
         }
         // Maps a rank index (0-9) to one of the 9 progress-N.svg files
-        // (0 = not started, 8 = Queen Bee). Beginner/Good Start share an
-        // image, as do Moving Up/Good and Nice/Great.
+        // (0 = not started, 8 = Queen Bee). Two pairs of ranks share an
+        // image - Beginner/Good Start and Moving Up/Good - which uses up
+        // icons 1-8 exactly. (Keep in sync with archive.html.)
         function beeProgressImageIndex(rankIdx) {
             if (rankIdx <= 1) return 1;
             if (rankIdx <= 3) return 2;
@@ -993,7 +999,7 @@
                             <button ${clickAttr} class="${cardClass}" style="${config.bgColor}">
                                 <div class="primary-content">
                                     <span class="primary-title">${config.puzzleName}</span>
-                                    <span class="primary-subtitle">${subtitle}</span>
+                                    <span class="primary-subtitle">${escapeHtml(subtitle)}</span>
                                     <span class="primary-date">${dateString}</span>
                                 </div>
                                 <div class="card-img-container">

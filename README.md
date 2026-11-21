@@ -5,10 +5,11 @@
 ```
 crossword/
 ├── docker-compose.yml       # defines the two services: web + scraper
+├── .env                     # YOUR secrets (git-ignored) - copy from .env.example
 ├── Dockerfile                # one image, used by both services
 ├── requirements.txt
-├── app.py                     # your existing Flask app, unmodified
-├── templates/                 # your existing HTML templates, unmodified
+├── app.py                     # the Flask app
+├── templates/                 # the HTML templates
 │   ├── index.html
 │   ├── login.html
 │   ├── archive.html
@@ -52,15 +53,14 @@ crossword/
     ├── midi/                    # progress-{0-9}.svg, complete-gold.svg, complete.svg, unavailable.svg
     ├── mini/                    # progress-{0-4}.svg, complete-gold.svg, complete.svg, unavailable.svg
     ├── wordle/                  # progress-{0-5}.svg, complete-won.svg, complete-lost.svg, unavailable.svg
-    ├── speling-bee/             # progress-{0-8}.svg, unavailable.svg
+    ├── spelling-bee/            # progress-{0-8}.svg, unavailable.svg
     ├── connections.svg
     └── victory.mp3
 ```
 
 Because both containers set `working_dir: /app/data` and mount this folder
-there, `app.py`'s existing relative paths (`"puzzles/xwords"`,
-`"puzzle_progress.db"`, etc.) resolve correctly with **zero changes to
-app.py**. The code lives at `/app` (baked into the image); the data lives at
+there, `app.py`'s relative paths (`"puzzles/xwords"`,
+`"puzzle_progress.db"`, etc.) resolve correctly. The code lives at `/app` (baked into the image); the data lives at
 `/app/data` (bind-mounted from the host).
 
 ## 2. Two containers, one image
@@ -78,7 +78,7 @@ app.py**. The code lives at `/app` (baked into the image); the data lives at
 | When | Script | What |
 |---|---|---|
 | 22:10 Tuesday - Saturday, 18:10 Saturday - Monday| `crosswords_daily.sh` | NYT Daily/Mini/Midi crosswords (only if `NYT_S_COOKIE` is set)
-| 17:10 daily | `wordle_daily.sh` | Wordle |
+| 18:10 daily | `wordle_daily.sh` | Wordle |
 | 03:10 daily | `spelling_bee_daily.sh` | Spelling Bee |
 | 13:00 Sundays | `weekly_xwords_pull.sh` | `git pull`s your archive repo |
 
@@ -92,9 +92,20 @@ sudo mkdir -p /opt/stacks/crossword /opt/appdata/crossword
 sudo cp -r stacks/crossword/. /opt/stacks/crossword/
 sudo cp -r appdata/crossword/. /opt/appdata/crossword/
 
-# 3. Build and start
+# 3. Create your secrets file (it is git-ignored - never commit it)
+cd /opt/stacks/crossword
+cp .env.example .env
+nano .env          # paste your NYT_S_COOKIE; FLASK_SECRET_KEY may stay empty
+
+# 4. Build and start
 docker compose up -d --build
 ```
+
+> **Secrets:** `FLASK_SECRET_KEY` and `NYT_S_COOKIE` used to be written directly
+> in `docker-compose.yml`. They now come from `.env`. If an old version of this
+> repo (with real values in it) was ever public, treat both as compromised:
+> log out of nytimes.com everywhere / log in again to get a fresh `NYT-S`
+> cookie, and use a new `FLASK_SECRET_KEY` (this signs everyone out once).
 
 Then visit `http://<your-server>:5235`.
 

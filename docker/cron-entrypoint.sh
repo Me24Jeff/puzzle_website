@@ -3,22 +3,40 @@ set -euo pipefail
 
 # Configure system timezone from the TZ environment variable if set
 if [ -n "${TZ:-}" ]; then
-  ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
-  echo "$TZ" > /etc/timezone
+  if [ -e "/usr/share/zoneinfo/${TZ}" ]; then
+    ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime
+    echo "${TZ}" > /etc/timezone
+  else
+    echo "WARNING: unknown TZ '${TZ}', leaving the system timezone alone" >&2
+  fi
 fi
 
 # cron jobs run in a minimal environment and do NOT inherit the container's
 # env vars (NYT_S_COOKIE, XWORDS_REPO_URL, etc). Snapshot them once here to
 # a file that every script sources before it runs.
-printenv | sed -e 's/^\(.*\)$/export \1/' \
-  | grep -vE '^export (HOME|PWD|SHLVL|_)=' > /app/.env.runtime
+#
+# `export -p` prints every exported variable as `declare -x NAME="value"` with
+# the value properly quoted/escaped, so cookies or passwords containing spaces,
+# $, quotes, ; or & survive the round trip. (The old `export NAME=value` form
+# was unquoted and broke on those characters.)
+umask 077                                   # file is never world/group readable, not even briefly
+export -p \
+  | grep -vE '^declare -x (HOME|PWD|OLDPWD|SHLVL|_|TERM|HOSTNAME)=' \
+  > /app/.env.runtime.tmp
+mv /app/.env.runtime.tmp /app/.env.runtime
 chmod 600 /app/.env.runtime
 
 mkdir -p /app/data/logs
-touch /app/data/logs/cron.log
+LOG=/app/data/logs/cron.log
+
+# Keep the log from growing forever: roll it over once it passes ~5 MB.
+if [ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 5242880 ]; then
+  mv -f "$LOG" "$LOG.1"
+fi
+touch "$LOG"
 
 echo "$(date -Is) cron container starting, timezone: $(cat /etc/timezone 2>/dev/null || echo unknown)" \
-  >> /app/data/logs/cron.log
+  >> "$LOG"
 
 # Foreground cron so the container stays up / logs to `docker logs`.
-cron -f
+exec cron -f
