@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- iOS / Apple Home Screen Icon -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icon/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Crossword">
+
+    <!-- Android / Chrome Web App Manifest -->
+    <link rel="manifest" href="/static/site.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    {% include '_sw.html' %}
+    {% include '_viewport_fix.html' %}
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon/192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon/512.png">
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
+    <title>Connections &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'media' }
+    </script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: manipulation;
+        }
+        body { background: #f1f5f9; }
+        @media (prefers-color-scheme: dark) { body { background: #1c1c1e; } }
+
+        #page { height: 100%; }
+
+        /* Connections category colors (NYT palette) */
+        .cat-level-0 { background-color: #f9df6d; color: #0f172a; }
+        .cat-level-1 { background-color: #a0c35a; color: #0f172a; }
+        .cat-level-2 { background-color: #b0c4ef; color: #0f172a; }
+        .cat-level-3 { background-color: #ba81c5; color: #0f172a; }
+
+        /* 4x4 grid */
+        #tile-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            width: 100%;
+        }
+
+        .conn-tile {
+            position: relative;
+            background-color: #efefe6;
+            color: #0f172a;
+            border: none;
+            border-radius: 10px;
+            min-height: 70px;
+            aspect-ratio: 1.15 / 1;
+            padding: 6px 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-weight: 800;
+            text-transform: uppercase;
+            line-height: 1.12;
+            letter-spacing: -0.01em;
+            cursor: pointer;
+            user-select: none;
+            overflow-wrap: anywhere;
+            word-break: normal;
+            transition: transform 0.1s ease, background-color 0.15s ease, color 0.15s ease;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        @media (prefers-color-scheme: dark) {
+            .conn-tile {
+                background-color: #2c2c2e;
+                color: #f1f5f9;
+            }
+            /* Image SVGs from NYT are dark strokes on transparent background */
+            .conn-tile.is-image {
+                background-color: #e5e5dc;
+                color: #0f172a;
+            }
+        }
+        .conn-tile:active { transform: scale(0.95); }
+        .conn-tile.selected {
+            background-color: #5a594e;
+            color: #ffffff;
+        }
+        @media (prefers-color-scheme: dark) {
+            .conn-tile.selected {
+                background-color: #e5e5ea;
+                color: #1c1c1e;
+            }
+            .conn-tile.is-image.selected {
+                background-color: #a8a89e;
+                color: #0f172a;
+                outline: 3px solid #f1f5f9;
+                outline-offset: -3px;
+            }
+        }
+
+        .conn-tile.shake {
+            animation: tile-shake 0.48s ease-in-out;
+        }
+        @keyframes tile-shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-5px); }
+            40% { transform: translateX(5px); }
+            60% { transform: translateX(-4px); }
+            80% { transform: translateX(4px); }
+        }
+
+        .conn-tile.hop {
+            animation: tile-hop 0.28s ease;
+        }
+        @keyframes tile-hop {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+            100% { transform: translateY(0); }
+        }
+
+        .cat-banner {
+            border-radius: 10px;
+            padding: 12px 14px;
+            text-align: center;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .cat-banner.pop {
+            animation: banner-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @keyframes banner-pop {
+            0% { opacity: 0; transform: scale(0.92); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .mistake-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #5a594e;
+            transition: transform 0.25s ease, opacity 0.25s ease;
+        }
+        @media (prefers-color-scheme: dark) {
+            .mistake-dot { background-color: #d4d4d8; }
+        }
+        .mistake-dot.used {
+            transform: scale(0);
+            opacity: 0;
+        }
+
+        .ctrl-btn {
+            border: 1.5px solid #94a3b8;
+            border-radius: 9999px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 0.62rem 1.2rem;
+            background: transparent;
+            color: #0f172a;
+            cursor: pointer;
+            transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @media (prefers-color-scheme: dark) {
+            .ctrl-btn { border-color: #52525b; color: #f1f5f9; }
+        }
+        .ctrl-btn:active:not(:disabled) { transform: scale(0.96); }
+        .ctrl-btn:disabled { opacity: 0.38; cursor: default; }
+        .ctrl-btn.submit-btn:not(:disabled) {
+            background-color: #0f172a;
+            border-color: #0f172a;
+            color: #ffffff;
+        }
+        @media (prefers-color-scheme: dark) {
+            .ctrl-btn.submit-btn:not(:disabled) {
+                background-color: #f1f5f9;
+                border-color: #f1f5f9;
+                color: #0f172a;
+            }
+        }
+
+        #toast-container {
+            position: fixed;
+            top: 72px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9000;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.92);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+            animation: fadeInOut 2.2s forwards;
+            white-space: nowrap;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            12% { opacity: 1; transform: translateY(0); }
+            84% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body class="font-sans">
+    <div id="toast-container"></div>
+
+    <!-- Result Modal -->
+    <div id="result-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-neutral-900 rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl border border-slate-100 dark:border-neutral-700">
+            <div id="modal-emoji" class="text-5xl mb-3">🎉</div>
+            <h2 id="modal-title" class="text-2xl font-black text-slate-900 dark:text-white mb-1">Solid!</h2>
+            <p id="modal-subtitle" class="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-4">You solved today's Connections.</p>
+
+            <div class="bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl p-4 mb-5">
+                <p id="modal-puzzle-meta" class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-neutral-400 mb-2">&nbsp;</p>
+                <div id="modal-guess-grid" class="flex flex-col items-center gap-1 my-2 text-xl leading-none select-none"></div>
+                <div class="flex items-center justify-center gap-1.5 text-slate-600 dark:text-neutral-400 text-xs font-semibold mt-3">
+                    <span>Mistakes:</span>
+                    <span id="modal-mistakes" class="font-mono text-slate-900 dark:text-white">0/4</span>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-2.5">
+                <button onclick="copyShareResult()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-6 rounded-xl transition active:scale-95 shadow-sm">
+                    Copy Result
+                </button>
+                <button onclick="closeResultModal()" class="w-full bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-semibold py-2.5 px-6 rounded-xl transition active:scale-95 shadow-sm">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="page" class="max-w-6xl mx-auto bg-white dark:bg-[#1c1c1e] shadow-sm flex flex-col h-screen">
+
+        <!-- Header -->
+        <header class="flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-neutral-700 shrink-0"
+                 style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+            <button onclick="goBack()"
+                    aria-label="Back"
+                    class="text-slate-700 dark:text-neutral-300 hover:text-black dark:hover:text-white text-2xl leading-none w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-neutral-800 transition">
+                &#8249;
+            </button>
+            <div class="flex-1 min-w-0">
+                <p class="font-semibold text-slate-900 dark:text-white truncate text-sm">Connections</p>
+                <p id="puzzle-date" class="text-xs text-slate-500 dark:text-neutral-400 truncate"></p>
+            </div>
+
+            <button id="results-btn" onclick="openResultModal()" class="hidden px-3 h-8 rounded-full text-xs font-bold bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900 transition active:scale-95">
+                Results
+            </button>
+
+            <div id="mistakes-badge" class="font-mono font-bold text-sm text-slate-700 dark:text-neutral-300 bg-slate-100 dark:bg-neutral-800 px-2.5 py-1 rounded-md border border-slate-200 dark:border-neutral-700 select-none">
+                0/4
+            </div>
+        </header>
+
+        {% if puzzle_unavailable %}
+        <div class="flex-1 flex items-center justify-center p-6">
+            <div class="text-center max-w-sm">
+                <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
+                <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or before the Connections archive started.</p>
+            </div>
+        </div>
+        {% else %}
+        <main class="flex-1 min-h-0 flex flex-col items-center justify-center px-3 py-3 overflow-y-auto">
+            <div class="w-full max-w-[540px] flex flex-col gap-3">
+                <p class="text-center text-sm font-semibold text-slate-600 dark:text-neutral-400 select-none">
+                    Create four groups of four!
+                </p>
+
+                <!-- Solved categories + 4x4 grid -->
+                <div class="flex flex-col gap-2">
+                    <div id="solved-banners" class="flex flex-col gap-2"></div>
+                    <div id="tile-grid"></div>
+                </div>
+
+                <!-- Mistakes remaining -->
+                <div id="mistakes-row" class="flex items-center justify-center gap-2.5 py-1 select-none">
+                    <span class="text-xs font-semibold text-slate-600 dark:text-neutral-400">Mistakes remaining:</span>
+                    <div id="mistake-dots" class="flex items-center gap-2">
+                        <span class="mistake-dot"></span>
+                        <span class="mistake-dot"></span>
+                        <span class="mistake-dot"></span>
+                        <span class="mistake-dot"></span>
+                    </div>
+                </div>
+
+                <!-- Action controls -->
+                <div id="controls-row" class="flex items-center justify-center gap-2.5 pb-2">
+                    <button id="shuffle-btn" class="ctrl-btn" onclick="shuffleTiles()">Shuffle</button>
+                    <button id="deselect-btn" class="ctrl-btn" onclick="deselectAll()" disabled>Deselect All</button>
+                    <button id="submit-btn" class="ctrl-btn submit-btn" onclick="submitGuess()" disabled>Submit</button>
+                </div>
+            </div>
+        </main>
+        {% endif %}
+    </div>
+
+    <script id="conn-meta" type="application/json">
+        {{ {"year": year, "month": month, "day": day} | tojson }}
+    </script>
+
+    <script>
+        function goBack() {
+            const back = new URLSearchParams(window.location.search).get('back');
+            let dest = '/';
+            // Only ever follow a same-origin link: ?back= is attacker-controllable
+            // (e.g. "javascript:..." or another site), so anything else goes home.
+            try {
+                const u = new URL(back || '/', window.location.origin);
+                if (u.origin === window.location.origin) dest = u.pathname + u.search + u.hash;
+            } catch (e) { /* malformed -> home */ }
+            window.location.href = dest;
+        }
+    </script>
+
+    {% if not puzzle_unavailable %}
+    <script id="conn-puzzle" type="application/json">
+        {{ puzzle | tojson }}
+    </script>
+    <script>
+        const meta = JSON.parse(document.getElementById('conn-meta').textContent);
+        const PUZZLE = JSON.parse(document.getElementById('conn-puzzle').textContent);
+        const SAVED = {{ (saved or {}) | tojson }};
+
+        const MAX_MISTAKES = 4;
+        const LEVEL_EMOJIS = ['🟨', '🟩', '🟦', '🟪'];
+
+        // Build card lookup (id = 0..15 assigned by position if valid, else index)
+        // Keeping a stable card id per card (its original position 0..15) makes
+        // saved state compact and preserves NYT's starting layout cleanly.
+        const CARDS = [];
+        const CARD_BY_ID = {};
+        const CATEGORIES = PUZZLE.categories.map((cat, idx) => {
+            const level = (typeof cat.level === 'number') ? cat.level : idx;
+            const cards = cat.cards.map((c, j) => {
+                const id = (typeof c.position === 'number') ? c.position : (idx * 4 + j);
+                const cardObj = {
+                    id,
+                    level,
+                    content: c.content || null,
+                    imageUrl: c.image_url || null,
+                    altText: c.image_alt_text || '',
+                    position: id,
+                };
+                CARDS.push(cardObj);
+                CARD_BY_ID[id] = cardObj;
+                return cardObj;
+            });
+            return { level, title: cat.title, cards };
+        });
+
+        const CATEGORY_BY_LEVEL = {};
+        CATEGORIES.forEach(cat => { CATEGORY_BY_LEVEL[cat.level] = cat; });
+
+        // Initial starting order: preserve NYT's curated 4x4 grid (`position: 0..15`)
+        const INITIAL_ORDER = [...CARDS].sort((a, b) => a.position - b.position).map(c => c.id);
+
+        let solvedLevels = [];     // levels solved in chronological order (e.g. [0, 2])
+        let revealedLevels = [];   // extra levels auto-revealed on loss
+        let mistakes = 0;
+        let guessHistory = [];     // [{ cards: [id1,id2,id3,id4], levels: [l1,l2,l3,l4] }, ...]
+        let unsolvedOrder = [...INITIAL_ORDER];
+        let selectedIds = new Set();
+        let gameOver = false;
+        let isWon = false;
+        let busy = false;
+
+        // --- Header date label ---
+        (function renderDateLabel() {
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            document.getElementById('puzzle-date').textContent = PUZZLE.id ? `${label} · #${PUZZLE.id}` : label;
+        })();
+
+        function escapeHtml(str) {
+            return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 2200);
+        }
+
+        function tileFontSize(text) {
+            if (!text) return '0.88rem';
+            // Emoji-only tiles look great larger
+            const noSpaces = text.replace(/\s+/g, '');
+            if (/^[\p{Emoji}\uFE0F\u200D]+$/u.test(noSpaces) && [...noSpaces].length <= 4) {
+                return '1.75rem';
+            }
+            const words = text.trim().split(/\s+/);
+            const longestWord = Math.max(...words.map(w => w.length));
+            const totalLen = text.length;
+            if (longestWord >= 12 || totalLen >= 20) return '0.66rem';
+            if (longestWord >= 9 || totalLen >= 14) return '0.74rem';
+            if (longestWord >= 7 || totalLen >= 10) return '0.82rem';
+            return '0.92rem';
+        }
+
+        function renderBannerElement(cat, animatePop) {
+            const div = document.createElement('div');
+            div.className = `cat-banner cat-level-${cat.level}` + (animatePop ? ' pop' : '');
+
+            const hasImages = cat.cards.some(c => c.imageUrl);
+            let membersHtml;
+            if (hasImages) {
+                const items = cat.cards.map(c => {
+                    const label = escapeHtml(c.altText || c.content || '');
+                    if (c.imageUrl) {
+                        return `<span class="inline-flex items-center gap-1 bg-white/60 rounded px-1.5 py-0.5 text-xs font-bold">` +
+                               `<img src="${escapeHtml(c.imageUrl)}" alt="${label}" class="w-4 h-4 object-contain" onerror="this.style.display='none'">` +
+                               `${label}</span>`;
+                    }
+                    return `<span class="text-xs font-bold">${label}</span>`;
+                }).join(' ');
+                membersHtml = `<div class="flex flex-wrap items-center justify-center gap-1.5 mt-1">${items}</div>`;
+            } else {
+                const names = cat.cards.map(c => c.content || c.altText).join(', ');
+                membersHtml = `<p class="text-xs sm:text-sm font-semibold uppercase tracking-wide mt-0.5">${escapeHtml(names)}</p>`;
+            }
+
+            div.innerHTML = `<p class="text-sm sm:text-base font-black uppercase tracking-wide">${escapeHtml(cat.title)}</p>${membersHtml}`;
+            return div;
+        }
+
+        function renderBoard(popLevel = null) {
+            const bannersEl = document.getElementById('solved-banners');
+            const gridEl = document.getElementById('tile-grid');
+            bannersEl.innerHTML = '';
+            gridEl.innerHTML = '';
+
+            const allDisplayedLevels = [...solvedLevels, ...revealedLevels];
+            allDisplayedLevels.forEach(lvl => {
+                const cat = CATEGORY_BY_LEVEL[lvl];
+                if (cat) bannersEl.appendChild(renderBannerElement(cat, lvl === popLevel));
+            });
+
+            if (unsolvedOrder.length === 0) {
+                gridEl.classList.add('hidden');
+            } else {
+                gridEl.classList.remove('hidden');
+                unsolvedOrder.forEach(id => {
+                    const card = CARD_BY_ID[id];
+                    if (!card) return;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.dataset.cardId = String(id);
+                    btn.className = 'conn-tile' +
+                        (card.imageUrl ? ' is-image' : '') +
+                        (selectedIds.has(id) ? ' selected' : '');
+
+                    if (card.imageUrl) {
+                        const img = document.createElement('img');
+                        img.src = card.imageUrl;
+                        img.alt = card.altText || '';
+                        img.className = 'max-h-[76%] max-w-[82%] object-contain pointer-events-none';
+                        img.onerror = () => {
+                            btn.classList.remove('is-image');
+                            btn.textContent = card.altText || '?';
+                            btn.style.fontSize = tileFontSize(btn.textContent);
+                        };
+                        btn.appendChild(img);
+                    } else {
+                        btn.textContent = card.content;
+                        btn.style.fontSize = tileFontSize(card.content);
+                    }
+
+                    btn.onclick = () => toggleTile(id, btn);
+                    btn.addEventListener('mousedown', e => e.preventDefault());
+                    gridEl.appendChild(btn);
+                });
+            }
+
+            updateMistakesUI();
+            updateControlsUI();
+        }
+
+        function updateMistakesUI() {
+            document.getElementById('mistakes-badge').textContent = `${mistakes}/${MAX_MISTAKES}`;
+            const dots = document.querySelectorAll('#mistake-dots .mistake-dot');
+            const remaining = Math.max(0, MAX_MISTAKES - mistakes);
+            dots.forEach((dot, idx) => {
+                dot.classList.toggle('used', idx >= remaining);
+            });
+        }
+
+        function updateControlsUI() {
+            const shuffleBtn = document.getElementById('shuffle-btn');
+            const deselectBtn = document.getElementById('deselect-btn');
+            const submitBtn = document.getElementById('submit-btn');
+            const resultsBtn = document.getElementById('results-btn');
+            const controlsRow = document.getElementById('controls-row');
+            const mistakesRow = document.getElementById('mistakes-row');
+
+            if (gameOver) {
+                controlsRow.classList.add('hidden');
+                mistakesRow.classList.add('hidden');
+                resultsBtn.classList.remove('hidden');
+                return;
+            }
+
+            shuffleBtn.disabled = busy || unsolvedOrder.length <= 1;
+            deselectBtn.disabled = busy || selectedIds.size === 0;
+            submitBtn.disabled = busy || selectedIds.size !== 4;
+        }
+
+        function toggleTile(id, btnEl) {
+            if (gameOver || busy) return;
+            if (selectedIds.has(id)) {
+                selectedIds.delete(id);
+                btnEl.classList.remove('selected');
+            } else {
+                if (selectedIds.size >= 4) return;
+                selectedIds.add(id);
+                btnEl.classList.add('selected');
+            }
+            updateControlsUI();
+        }
+
+        function deselectAll() {
+            if (gameOver || busy || selectedIds.size === 0) return;
+            selectedIds.clear();
+            document.querySelectorAll('.conn-tile.selected').forEach(el => el.classList.remove('selected'));
+            updateControlsUI();
+        }
+
+        function shuffleTiles() {
+            if (gameOver || busy || unsolvedOrder.length <= 1) return;
+            for (let i = unsolvedOrder.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [unsolvedOrder[i], unsolvedOrder[j]] = [unsolvedOrder[j], unsolvedOrder[i]];
+            }
+            renderBoard();
+        }
+
+        function sameCardSet(a, b) {
+            if (a.length !== b.length) return false;
+            const sa = [...a].sort((x, y) => x - y);
+            const sb = [...b].sort((x, y) => x - y);
+            return sa.every((v, i) => v === sb[i]);
+        }
+
+        function saveProgress() {
+            const url = `/api/progress/Connections/${meta.year}/${meta.month}/${meta.day}`;
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userGrid: {
+                        solved: solvedLevels,
+                        mistakes: mistakes,
+                        guesses: guessHistory,
+                        order: unsolvedOrder
+                    },
+                    timerSeconds: mistakes,            // repurposed: mistakes made (0-4)
+                    ratio: solvedLevels.length / 4,
+                    completed: gameOver,
+                    usedCheck: isWon                   // repurposed: true = won, false = lost
+                })
+            }).then(r => {
+                if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
+                else if (!r.ok) showToast('Could not save progress - check your connection.');
+            }).catch(e => console.error('Error saving progress:', e));
+        }
+
+        function submitGuess() {
+            if (gameOver || busy || selectedIds.size !== 4) return;
+
+            const picked = [...selectedIds];
+            if (guessHistory.some(g => Array.isArray(g.cards) && sameCardSet(g.cards, picked))) {
+                showToast('Already guessed!');
+                return;
+            }
+
+            const levels = picked.map(id => CARD_BY_ID[id].level);
+            guessHistory.push({ cards: picked, levels });
+
+            busy = true;
+            updateControlsUI();
+
+            // Hop animation on the 4 selected tiles
+            const selectedEls = picked
+                .map(id => document.querySelector(`.conn-tile[data-card-id="${id}"]`))
+                .filter(Boolean);
+
+            selectedEls.forEach((el, idx) => {
+                setTimeout(() => el.classList.add('hop'), idx * 55);
+            });
+
+            setTimeout(() => {
+                selectedEls.forEach(el => el.classList.remove('hop'));
+
+                const firstLevel = levels[0];
+                const allSame = levels.every(l => l === firstLevel);
+
+                if (allSame) {
+                    const pickedSet = new Set(picked);
+                    solvedLevels.push(firstLevel);
+                    unsolvedOrder = unsolvedOrder.filter(id => !pickedSet.has(id));
+                    selectedIds.clear();
+                    busy = false;
+
+                    renderBoard(firstLevel);
+
+                    if (solvedLevels.length === 4) {
+                        finishGame(true);
+                    } else {
+                        saveProgress();
+                    }
+                    return;
+                }
+
+                // Incorrect guess: check for 3-of-4 ("One away...")
+                const counts = {};
+                levels.forEach(l => { counts[l] = (counts[l] || 0) + 1; });
+                const isOneAway = Object.values(counts).some(c => c === 3);
+
+                selectedEls.forEach(el => {
+                    el.classList.remove('shake');
+                    void el.offsetWidth;
+                    el.classList.add('shake');
+                });
+
+                mistakes++;
+                updateMistakesUI();
+
+                setTimeout(() => {
+                    selectedEls.forEach(el => el.classList.remove('shake'));
+                    busy = false;
+
+                    if (mistakes >= MAX_MISTAKES) {
+                        selectedIds.clear();
+                        showToast('Next time!');
+                        finishGame(false);
+                    } else {
+                        showToast(isOneAway ? 'One away...' : 'Not quite');
+                        updateControlsUI();
+                        saveProgress();
+                    }
+                }, 480);
+            }, 340);
+        }
+
+        function winVerdict(m) {
+            if (m === 0) return { emoji: '🎯', title: 'Perfection!', subtitle: 'Zero mistakes!' };
+            if (m === 1) return { emoji: '🌟', title: 'Great!', subtitle: 'Solved with 1 mistake.' };
+            if (m === 2) return { emoji: '🎉', title: 'Solid!', subtitle: 'Solved with 2 mistakes.' };
+            return { emoji: '😅', title: 'Phew!', subtitle: 'Solved on your last life.' };
+        }
+
+        function finishGame(won) {
+            gameOver = true;
+            isWon = won;
+
+            if (!won) {
+                const solvedSet = new Set(solvedLevels);
+                revealedLevels = [0, 1, 2, 3].filter(l => !solvedSet.has(l));
+                unsolvedOrder = [];
+                renderBoard();
+            } else {
+                const v = winVerdict(mistakes);
+                showToast(v.title);
+                updateControlsUI();
+            }
+
+            saveProgress();
+            setTimeout(() => openResultModal(), won ? 450 : 650);
+        }
+
+        function renderGuessGridHtml() {
+            return guessHistory.map(g => {
+                const row = (g.levels || []).map(l => LEVEL_EMOJIS[l] || '⬜').join('');
+                return `<div class="tracking-widest">${row}</div>`;
+            }).join('');
+        }
+
+        function openResultModal() {
+            if (isWon) {
+                const v = winVerdict(mistakes);
+                document.getElementById('modal-emoji').textContent = v.emoji;
+                document.getElementById('modal-title').textContent = v.title;
+                document.getElementById('modal-subtitle').textContent = v.subtitle;
+            } else {
+                document.getElementById('modal-emoji').textContent = '😔';
+                document.getElementById('modal-title').textContent = 'Next Time';
+                document.getElementById('modal-subtitle').textContent = 'Better luck tomorrow!';
+            }
+
+            const dateStr = `${meta.year}-${meta.month}-${meta.day}`;
+            document.getElementById('modal-puzzle-meta').textContent =
+                PUZZLE.id ? `Puzzle #${PUZZLE.id} · ${dateStr}` : dateStr;
+            document.getElementById('modal-guess-grid').innerHTML = renderGuessGridHtml();
+            document.getElementById('modal-mistakes').textContent = `${mistakes}/${MAX_MISTAKES}`;
+            document.getElementById('result-modal').classList.remove('hidden');
+        }
+
+        function closeResultModal() {
+            document.getElementById('result-modal').classList.add('hidden');
+        }
+
+        async function copyShareResult() {
+            const header = PUZZLE.id
+                ? `Connections #${PUZZLE.id}`
+                : `Connections ${meta.year}-${meta.month}-${meta.day}`;
+            const rows = guessHistory
+                .map(g => (g.levels || []).map(l => LEVEL_EMOJIS[l] || '⬜').join(''))
+                .join('\n');
+            const text = rows ? `${header}\n${rows}` : header;
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('Copied results to clipboard');
+            } catch (e) {
+                showToast('Could not copy to clipboard');
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameOver || busy) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitGuess();
+            } else if (e.key === 'Escape') {
+                deselectAll();
+            }
+        });
+
+        function loadProgress() {
+            const saved = SAVED;
+            if (saved && saved.userGrid && typeof saved.userGrid === 'object') {
+                const g = saved.userGrid;
+                if (Array.isArray(g.solved)) {
+                    const seen = new Set();
+                    solvedLevels = g.solved.filter(l => {
+                        if (typeof l !== 'number' || !CATEGORY_BY_LEVEL[l] || seen.has(l)) return false;
+                        seen.add(l);
+                        return true;
+                    });
+                }
+                if (typeof g.mistakes === 'number') {
+                    mistakes = Math.max(0, Math.min(MAX_MISTAKES, g.mistakes));
+                }
+                if (Array.isArray(g.guesses)) {
+                    guessHistory = g.guesses.filter(item => item && Array.isArray(item.levels));
+                }
+
+                const solvedCardIds = new Set();
+                solvedLevels.forEach(l => {
+                    CATEGORY_BY_LEVEL[l].cards.forEach(c => solvedCardIds.add(c.id));
+                });
+                const expectedUnsolved = INITIAL_ORDER.filter(id => !solvedCardIds.has(id));
+                const expectedSet = new Set(expectedUnsolved);
+
+                if (Array.isArray(g.order) &&
+                    g.order.length === expectedUnsolved.length &&
+                    g.order.every(id => expectedSet.has(id)) &&
+                    new Set(g.order).size === expectedUnsolved.length) {
+                    unsolvedOrder = [...g.order];
+                } else {
+                    unsolvedOrder = expectedUnsolved;
+                }
+            }
+
+            if (saved && saved.completed) {
+                gameOver = true;
+                isWon = !!saved.usedCheck;
+                if (!isWon) {
+                    const solvedSet = new Set(solvedLevels);
+                    revealedLevels = [0, 1, 2, 3].filter(l => !solvedSet.has(l));
+                    unsolvedOrder = [];
+                }
+                if (isWon) {
+                    showToast(winVerdict(mistakes).title);
+                } else {
+                    showToast('Next time!');
+                }
+            }
+
+            renderBoard();
+        }
+
+        loadProgress();
+    </script>
+    {% endif %}
+</body>
+</html>

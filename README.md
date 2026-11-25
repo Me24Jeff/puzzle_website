@@ -15,9 +15,11 @@ crossword/
 │   ├── archive.html
 │   ├── play.html
 │   ├── wordle.html
-│   └── spelling-bee.html
+│   ├── spelling-bee.html
+│   └── connections.html
 ├── scrapers/
 │   ├── wordle_scraper.py          # pulls wordle puzzles
+│   ├── connections_scraper.py     # pulls nyt connections puzzles (daily + backfill)
 │   ├── crossword_scraper.py       # pulls nyt crossword (needs NYT_S_COOKIE)
 │   ├── sbsolver_scraper.py        # yours, unmodified - kept as a manual
 │   │                               #   backfill/fallback tool
@@ -25,6 +27,7 @@ crossword/
 ├── scripts/                       # what cron actually calls
 │   ├── crosswords_daily.sh        # daily/mini/midi crosswords
 │   ├── wordle_daily.sh            # wordle
+│   ├── connections_daily.sh       # connections
 │   ├── spelling_bee_daily.sh      # spelling bee
 │   └── weekly_xwords_pull.sh      # pulls your GitHub xwords repo
 └── docker/
@@ -44,6 +47,7 @@ crossword/
 │   ├── crosswords/              # NY Times/<year>/<month>/<day[-mini|-midi]>.json
 │   │                             #   one file per scraped daily/mini/midi puzzle
 │   ├── spelling-bee/            # <year>/<month>/<day>.json, one per day
+│   ├── connections/             # <year>/<month>/<day>.json, one per day
 │   ├── wordle_words.txt         # fixed-width file, appended to daily
 │   └── valid_wordle_words.txt   # you already maintain this; not touched by any scraper
 └── static/
@@ -79,6 +83,7 @@ there, `app.py`'s relative paths (`"puzzles/xwords"`,
 |---|---|---|
 | 22:10 Tuesday - Saturday, 18:10 Saturday - Monday| `crosswords_daily.sh` | NYT Daily/Mini/Midi crosswords (only if `NYT_S_COOKIE` is set)
 | 18:10 daily | `wordle_daily.sh` | Wordle |
+| 18:10 daily | `connections_daily.sh` | Connections |
 | 03:10 daily | `spelling_bee_daily.sh` | Spelling Bee |
 | 13:00 Sundays | `weekly_xwords_pull.sh` | `git pull`s your archive repo |
 

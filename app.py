@@ -119,22 +119,27 @@ WORDLE_VALID_WORDS_FILE = "puzzles/valid_wordle_words.txt"
 # One JSON file per day. Layout: puzzles/spelling-bee/<year>/<month>/<day>.json
 SPELLING_BEE_DIR = "puzzles/spelling-bee"
 
+# One JSON file per day. Layout: puzzles/connections/<year>/<month>/<day>.json
+CONNECTIONS_DIR = "puzzles/connections"
+
 # Puzzle type -> (publisher, day_key suffix). For the NY Times puzzles, the
 # publisher is always 'NY Times' and the puzzle type is encoded as a suffix
-# on the day_key. Wordle isn't from NY Times, so it gets its own publisher
-# instead of a suffix, but otherwise reuses the exact same progress schema.
+# on the day_key. Wordle, Spelling Bee, and Connections get their own
+# publisher instead of a suffix, reusing the exact same progress schema.
 PUZZLE_PUBLISHER = 'NY Times'
 WORDLE_PUBLISHER = 'Wordle'
 SPELLING_BEE_PUBLISHER = 'SpellingBee'
+CONNECTIONS_PUBLISHER = 'Connections'
 TYPE_FOLDER_CONFIG = {
     'normal':       {'publisher': PUZZLE_PUBLISHER, 'suffix': '',},
     'midi':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-midi',},
     'mini':         {'publisher': PUZZLE_PUBLISHER, 'suffix': '-mini',},
     'wordle':       {'publisher': WORDLE_PUBLISHER, 'suffix': '',},
     'spelling-bee': {'publisher': SPELLING_BEE_PUBLISHER, 'suffix': '',},
+    'connections':  {'publisher': CONNECTIONS_PUBLISHER, 'suffix': '',},
 }
 
-for _d in (PUZZLE_DIR, CROSSWORD_FALLBACK_DIR, SPELLING_BEE_DIR):
+for _d in (PUZZLE_DIR, CROSSWORD_FALLBACK_DIR, SPELLING_BEE_DIR, CONNECTIONS_DIR):
     os.makedirs(_d, exist_ok=True)
 
 
@@ -351,6 +356,7 @@ def get_progress_summary(user_id, since=None):
                 # For crosswords this is elapsed solve time in seconds.
                 # For Wordle it's repurposed to hold the number of guesses used.
                 # For Spelling Bee it holds the score.
+                # For Connections it holds the number of mistakes made (0-4).
                 'timerSeconds': row[7]
             }
     return summary
@@ -1073,9 +1079,9 @@ def get_user_stats():
     with db() as conn:
         rows = conn.execute(
             "SELECT publisher, year, month, day_key, timer_seconds, ratio, completed, used_check, "
-            "CASE WHEN publisher IN (?, ?) THEN user_grid ELSE NULL END "
+            "CASE WHEN publisher IN (?, ?, ?) THEN user_grid ELSE NULL END "
             "FROM progress WHERE user_id = ?",
-            (SPELLING_BEE_PUBLISHER, WORDLE_PUBLISHER, user_id)
+            (SPELLING_BEE_PUBLISHER, WORDLE_PUBLISHER, CONNECTIONS_PUBLISHER, user_id)
         ).fetchall()
 
     xw = {k: {'played': 0, 'solved': 0, 'gold': 0, 'times': []} for k in ('normal', 'midi', 'mini')}
@@ -1088,6 +1094,13 @@ def get_user_stats():
     wordle_win_guesses = []
     wordle_dist = {str(n): 0 for n in range(1, WORDLE_MAX_GUESSES + 1)}
 
+    conn_finished = 0
+    conn_wins = 0
+    conn_perfect = 0
+    conn_purple_first = 0
+    conn_win_mistakes = []
+    conn_dist = {'0': 0, '1': 0, '2': 0, '3': 0, 'loss': 0}
+
     bee_played = 0
     bee_words = 0
     bee_pangrams = 0
@@ -1097,6 +1110,33 @@ def get_user_stats():
     bee_rank_counts = [0] * len(BEE_RANKS)
 
     for publisher, year, month, day_key, secs, ratio, completed, used_check, grid_json in rows:
+        if publisher == CONNECTIONS_PUBLISHER:
+            # For Connections: timer_seconds = mistakes used (0-4), used_check = won.
+            if completed:
+                conn_finished += 1
+                if used_check:
+                    conn_wins += 1
+                    try:
+                        mistakes = int(secs) if secs is not None else 0
+                    except (TypeError, ValueError, OverflowError):
+                        mistakes = 0
+                    mistakes = max(0, min(mistakes, 3))
+                    conn_win_mistakes.append(mistakes)
+                    conn_dist[str(mistakes)] += 1
+                    if mistakes == 0:
+                        conn_perfect += 1
+                else:
+                    conn_dist['loss'] += 1
+                try:
+                    g = json.loads(grid_json) if grid_json else {}
+                except ValueError:
+                    g = {}
+                if isinstance(g, dict):
+                    solved = g.get('solved', [])
+                    if isinstance(solved, list) and solved and solved[0] == 3:
+                        conn_purple_first += 1
+            continue
+
         if publisher == WORDLE_PUBLISHER:
             # For Wordle: timer_seconds = guesses used, used_check = won.
             if completed:
@@ -1202,6 +1242,16 @@ def get_user_stats():
             'hardRate': _pct(wordle_hard_wins, wordle_wins),
             'hardWins': wordle_hard_wins,
         },
+        'connections': {
+            'played': conn_finished,
+            'wins': conn_wins,
+            'winRate': _pct(conn_wins, conn_finished),
+            'perfectGames': conn_perfect,
+            'perfectRate': _pct(conn_perfect, conn_wins),
+            'avgMistakes': _avg(conn_win_mistakes, 1),
+            'purpleFirst': conn_purple_first,
+            'distribution': conn_dist,
+        },
         'bee': {
             'played': bee_played,
             'genius': bee_genius,
@@ -1282,11 +1332,10 @@ def handle_puzzle_progress(publisher, year, month, day_key):
 # ---------------------------------------------------------------------------
 # Archive
 # ---------------------------------------------------------------------------
-def get_spelling_bee_days_in_month(year, month_padded):
-    """Days (as ints) within a given year/month that have a Spelling Bee
-    puzzle file on disk, mirroring get_puzzle_days_in_month() but scanning
-    puzzles/spelling-bee/<year>/<month>/ instead of the master index."""
-    folder = os.path.join(SPELLING_BEE_DIR, str(int(year)), month_padded)
+def _get_dated_json_days_in_month(base_dir, year, month_padded):
+    """Days (as ints) within a given year/month that have a <DD>.json file
+    under `base_dir/<year>/<month>/`."""
+    folder = os.path.join(base_dir, str(int(year)), month_padded)
     if not os.path.isdir(folder):
         return []
     days = []
@@ -1299,14 +1348,14 @@ def get_spelling_bee_days_in_month(year, month_padded):
     return sorted(days)
 
 
-def get_spelling_bee_available_range():
-    """Earliest (year, month) with at least one Spelling Bee puzzle file on
-    disk, or None if there aren't any yet."""
-    if not os.path.isdir(SPELLING_BEE_DIR):
+def _get_dated_json_available_range(base_dir):
+    """Earliest (year, month) with at least one puzzle file on disk under
+    `base_dir`, or None if there aren't any yet."""
+    if not os.path.isdir(base_dir):
         return None
     min_ym = None
-    for year_str in os.listdir(SPELLING_BEE_DIR):
-        year_path = os.path.join(SPELLING_BEE_DIR, year_str)
+    for year_str in os.listdir(base_dir):
+        year_path = os.path.join(base_dir, year_str)
         if not (year_str.isdigit() and os.path.isdir(year_path)):
             continue
         for month_str in os.listdir(year_path):
@@ -1318,6 +1367,14 @@ def get_spelling_bee_available_range():
                 if min_ym is None or ym < min_ym:
                     min_ym = ym
     return min_ym
+
+
+def get_spelling_bee_days_in_month(year, month_padded):
+    return _get_dated_json_days_in_month(SPELLING_BEE_DIR, year, month_padded)
+
+
+def get_spelling_bee_available_range():
+    return _get_dated_json_available_range(SPELLING_BEE_DIR)
 
 
 def get_puzzle_days_in_month(publisher, suffix, year, month_padded):
@@ -1420,6 +1477,9 @@ def get_archive_range_info(type_folder):
     elif type_folder == 'spelling-bee':
         min_ym = get_spelling_bee_available_range()
         start_year, start_month = min_ym if min_ym else (None, None)
+    elif type_folder == 'connections':
+        min_ym = _get_dated_json_available_range(CONNECTIONS_DIR)
+        start_year, start_month = min_ym if min_ym else (None, None)
     else:
         min_ym, _ = get_puzzle_available_range(type_folder)
         start_year, start_month = min_ym if min_ym else (None, None)
@@ -1478,11 +1538,13 @@ def build_archive_bundle(user_id, type_folder, year, month):
         }
 
     # Which days this month actually have a puzzle at all. Only meaningful
-    # for the NY Times types (old years didn't publish every day) and Spelling
-    # Bee. Wordle's availability is a contiguous range (wordleRange below).
+    # for the NY Times types (old years didn't publish every day), Spelling Bee,
+    # and Connections. Wordle's availability is a contiguous range (wordleRange below).
     available_days = None
     if type_folder == 'spelling-bee':
         available_days = get_spelling_bee_days_in_month(year, month_padded)
+    elif type_folder == 'connections':
+        available_days = _get_dated_json_days_in_month(CONNECTIONS_DIR, year, month_padded)
     elif type_folder != 'wordle':
         available_days = get_puzzle_days_in_month(publisher, suffix, year, month_padded)
 
@@ -1602,6 +1664,12 @@ def index():
                 f"{today_date.month:02d}", f"{today_date.day:02d}.json"))
             today_titles[p_type] = "Make as many words as you can with 7 letters."
             continue
+        if p_type == 'connections':
+            today_available[p_type] = os.path.exists(os.path.join(
+                CONNECTIONS_DIR, str(today_date.year),
+                f"{today_date.month:02d}", f"{today_date.day:02d}.json"))
+            today_titles[p_type] = "Group words that share a common thread."
+            continue
 
         day_key = day_base + cfg['suffix']
         publisher = cfg['publisher']
@@ -1711,10 +1779,10 @@ def wordle_valid_words():
 
 
 # ---------------------------------------------------------------------------
-# Spelling Bee Routes
+# Spelling Bee & Connections Routes
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=512)
-def _read_bee_file(path, mtime_ns):
+def _read_dated_json_file(path, mtime_ns):
     # mtime is part of the cache key, so a re-scraped puzzle is picked up
     # immediately while stats pages stop re-reading hundreds of files.
     with open(path, 'r', encoding='utf-8') as f:
@@ -1722,21 +1790,40 @@ def _read_bee_file(path, mtime_ns):
     return data if isinstance(data, dict) else None
 
 
-def get_spelling_bee_puzzle(target_date: date):
-    """Loads puzzles/spelling-bee/<year>/<month>/<day>.json for a given date,
-    or None if that day doesn't have a (readable) puzzle on disk."""
+def _load_dated_puzzle(base_dir, target_date: date):
     path = os.path.join(
-        SPELLING_BEE_DIR, str(target_date.year),
+        base_dir, str(target_date.year),
         f"{target_date.month:02d}", f"{target_date.day:02d}.json"
     )
     try:
         mtime_ns = os.stat(path).st_mtime_ns
-        data = _read_bee_file(path, mtime_ns)
+        return _read_dated_json_file(path, mtime_ns)
     except (OSError, ValueError):
         return None      # missing, unreadable, or a corrupt/partial JSON file
+
+
+def get_spelling_bee_puzzle(target_date: date):
+    """Loads puzzles/spelling-bee/<year>/<month>/<day>.json for a given date,
+    or None if that day doesn't have a (readable) puzzle on disk."""
+    data = _load_dated_puzzle(SPELLING_BEE_DIR, target_date)
     if not data or not all(k in data for k in ('center_letter', 'outer_letters', 'answers', 'max_points')):
         return None
     # Callers get their own copy so nobody can mutate the cached one.
+    return json.loads(json.dumps(data))
+
+
+def get_connections_puzzle(target_date: date):
+    """Loads puzzles/connections/<year>/<month>/<day>.json for a given date,
+    or None if that day doesn't have a valid puzzle on disk."""
+    data = _load_dated_puzzle(CONNECTIONS_DIR, target_date)
+    if not data:
+        return None
+    cats = data.get('categories')
+    if not isinstance(cats, list) or len(cats) != 4:
+        return None
+    for c in cats:
+        if not isinstance(c, dict) or not c.get('title') or not isinstance(c.get('cards'), list) or len(c['cards']) != 4:
+            return None
     return json.loads(json.dumps(data))
 
 
@@ -1766,6 +1853,35 @@ def play_spelling_bee(year, month, day):
 
     saved = get_saved_progress(user_id, SPELLING_BEE_PUBLISHER, year, month_p, day_p)
     return render_template('spelling-bee.html', puzzle_unavailable=False, puzzle=puzzle,
+                           year=year, month=month_p, day=day_p, saved=saved)
+
+
+@app.route('/connections')
+def connections_today():
+    if 'user_id' not in session:
+        return redirect('/login')
+    today = date.today()
+    return redirect(f"/connections/{today.year}/{today.month:02d}/{today.day:02d}")
+
+
+@app.route('/connections/<year>/<month>/<day>')
+def play_connections(year, month, day):
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect('/login')
+    try:
+        target_date = date(int(year), int(month), int(day))
+    except ValueError:
+        return "Invalid date", 400
+
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
+    puzzle = get_connections_puzzle(target_date)
+    if puzzle is None:
+        return render_template('connections.html', puzzle_unavailable=True,
+                               year=year, month=month_p, day=day_p)
+
+    saved = get_saved_progress(user_id, CONNECTIONS_PUBLISHER, year, month_p, day_p)
+    return render_template('connections.html', puzzle_unavailable=False, puzzle=puzzle,
                            year=year, month=month_p, day=day_p, saved=saved)
 
 

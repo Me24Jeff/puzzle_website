@@ -191,12 +191,13 @@
         </div>
 
         <!-- Puzzle Type Sub-Tabs -->
-        <div class="flex bg-slate-200/80 dark:bg-neutral-800 p-1 rounded-xl mb-4 text-xs font-bold">
-            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition">Crossword</button>
-            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Midi</button>
-            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Mini</button>
-            <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Wordle</button>
-            <button onclick="switchFriendsSubTab('spelling-bee')" id="subtab-spelling-bee" class="flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition">Bee</button>
+        <div class="flex bg-slate-200/80 dark:bg-neutral-800 p-1 rounded-xl mb-4 text-xs font-bold overflow-x-auto">
+            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 px-1.5 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition whitespace-nowrap">Crossword</button>
+            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Midi</button>
+            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Mini</button>
+            <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Wordle</button>
+            <button onclick="switchFriendsSubTab('spelling-bee')" id="subtab-spelling-bee" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Bee</button>
+            <button onclick="switchFriendsSubTab('connections')" id="subtab-connections" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Connections</button>
         </div>
 
         <!-- Leaderboard Users List -->
@@ -365,12 +366,12 @@
 
         function switchFriendsSubTab(type) {
             currentFriendsSubTab = type;
-            ['normal', 'midi', 'mini', 'wordle', 'spelling-bee'].forEach(t => {
+            ['normal', 'midi', 'mini', 'wordle', 'spelling-bee', 'connections'].forEach(t => {
                 const btn = document.getElementById(`subtab-${t}`);
                 if (t === type) {
-                    btn.className = 'flex-1 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition';
+                    btn.className = 'flex-1 px-1.5 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition whitespace-nowrap';
                 } else {
-                    btn.className = 'flex-1 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition';
+                    btn.className = 'flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap';
                 }
             });
             loadLeaderboard();
@@ -487,6 +488,22 @@
                 });
             }
 
+            if (currentFriendsSubTab === 'connections') {
+                // Winners first (fewest mistakes), then losses, then in-progress (most groups), then not started.
+                const rank3 = u => u.completed && u.usedCheck ? 0 : (u.completed ? 1 : (u.hasStarted ? 2 : 3));
+                users = [...users].sort((a, b) => {
+                    const r = rank3(a) - rank3(b);
+                    if (r !== 0) return r;
+                    if (rank3(a) === 0) {
+                        const ma = a.timerSeconds ?? 0, mb = b.timerSeconds ?? 0;
+                        if (ma !== mb) return ma - mb;
+                    } else if (rank3(a) === 2) {
+                        if ((b.ratio || 0) !== (a.ratio || 0)) return (b.ratio || 0) - (a.ratio || 0);
+                    }
+                    return a.username.localeCompare(b.username);
+                });
+            }
+
             if (currentFriendsSubTab === 'spelling-bee') {
                 // timerSeconds holds the score for Spelling Bee: highest first.
                 users = [...users].sort((a, b) => {
@@ -503,7 +520,23 @@
 
             users.forEach(u => {
                 let statusBadge = '';
-                if (currentFriendsSubTab === 'spelling-bee') {
+                if (currentFriendsSubTab === 'connections') {
+                // Winners first (fewest mistakes), then losses, then in-progress (most groups), then not started.
+                const rank3 = u => u.completed && u.usedCheck ? 0 : (u.completed ? 1 : (u.hasStarted ? 2 : 3));
+                users = [...users].sort((a, b) => {
+                    const r = rank3(a) - rank3(b);
+                    if (r !== 0) return r;
+                    if (rank3(a) === 0) {
+                        const ma = a.timerSeconds ?? 0, mb = b.timerSeconds ?? 0;
+                        if (ma !== mb) return ma - mb;
+                    } else if (rank3(a) === 2) {
+                        if ((b.ratio || 0) !== (a.ratio || 0)) return (b.ratio || 0) - (a.ratio || 0);
+                    }
+                    return a.username.localeCompare(b.username);
+                });
+            }
+
+            if (currentFriendsSubTab === 'spelling-bee') {
                     if (u.hasStarted) {
                         const rankName = beeRankName(u.ratio || 0);
                         const top = rankName === 'Genius' || rankName === 'Queen Bee';
@@ -523,6 +556,18 @@
                             </div>
                         `;
                     }
+                } else if (u.completed && currentFriendsSubTab === 'connections') {
+                    const won = u.usedCheck;
+                    const badgeBg = won ? 'bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900';
+                    const m = u.timerSeconds ?? 0;
+                    const mainLabel = won ? (m === 0 ? 'Perfect' : `${m} mistake${m === 1 ? '' : 's'}`) : '4/4 mistakes';
+                    const icon = won ? '✓ Won' : '✗ Lost';
+                    statusBadge = `
+                        <div class="text-right">
+                            <div class="font-black text-slate-800 dark:text-white text-base">${mainLabel}</div>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeBg}">${icon}</span>
+                        </div>
+                    `;
                 } else if (u.completed && currentFriendsSubTab === 'wordle') {
                     // usedCheck is repurposed for Wordle: true = won, false = lost.
                     // timerSeconds is repurposed to hold the number of guesses used.
@@ -562,7 +607,7 @@
                 }
 
                 const isRanked = currentFriendsSubTab === 'spelling-bee' ? u.hasStarted
-                    : currentFriendsSubTab === 'wordle' ? (u.completed && u.usedCheck) : u.completed;
+                    : (currentFriendsSubTab === 'wordle' || currentFriendsSubTab === 'connections') ? (u.completed && u.usedCheck) : u.completed;
                 const rankDisplay = isRanked ? `<span class="w-5 text-xs font-black text-slate-400 dark:text-neutral-500">#${rank++}</span>` : `<span class="w-5"></span>`;
 
                 html += `
@@ -585,11 +630,12 @@
         }
 
         const STAT_SECTIONS = [
-            { id: 'wordle', name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
-            { id: 'bee',    name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
-            { id: 'mini',   name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
-            { id: 'midi',   name: 'Midi',         color: '#7ca8f1', icon: '/static/midi/progress-0.svg' },
-            { id: 'normal', name: 'Crossword',    color: '#6593e6', icon: '/static/normal/progress-0.svg' },
+            { id: 'connections', name: 'Connections', color: '#b2a7f9', icon: '/static/connections.svg' },
+            { id: 'wordle',      name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
+            { id: 'bee',         name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
+            { id: 'mini',        name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
+            { id: 'midi',        name: 'Midi',         color: '#7ca8f1', icon: '/static/midi/progress-0.svg' },
+            { id: 'normal',      name: 'Crossword',    color: '#6593e6', icon: '/static/normal/progress-0.svg' },
         ];
 
         function buildStatsAccordion() {
@@ -660,6 +706,23 @@
 
         const dash = v => (v === null || v === undefined) ? '--' : String(v);
 
+        function renderConnectionsStats(c) {
+            const d = c.distribution || {};
+            const dist = [
+                { label: '0 err', count: d['0'] || 0 },
+                { label: '1 err', count: d['1'] || 0 },
+                { label: '2 err', count: d['2'] || 0 },
+                { label: '3 err', count: d['3'] || 0 },
+                { label: 'Lost',  count: d['loss'] || 0 },
+            ];
+            return statGrid([
+                statTile('Played', String(c.played)),
+                statTile('Won', c.winRate === null ? '--' : `${c.winRate}%`, `${c.wins} of ${c.played}`),
+                statTile('Perfect', c.perfectRate === null ? '--' : `${c.perfectRate}%`, `${c.perfectGames} zero-mistake`),
+                statTile('Avg mistakes', dash(c.avgMistakes), `${c.purpleFirst} purple first`),
+            ], 2) + distBars('Mistake Distribution', dist, '#b2a7f9', 'No finished Connections yet.', 'w-11');
+        }
+
         function renderWordleStats(w) {
             const dist = [1, 2, 3, 4, 5, 6].map(n => ({ label: String(n), count: (w.distribution || {})[String(n)] || 0 }));
             return statGrid([
@@ -721,6 +784,7 @@
             buildStatsAccordion();
             const stats = await fetchJsonCached('/api/user/stats', 60000);
             if (!stats) return;
+            if (stats.connections) setStatBody('connections', renderConnectionsStats(stats.connections));
             setStatBody('wordle', renderWordleStats(stats.wordle));
             setStatBody('bee', renderBeeStats(stats.bee));
             setStatBody('mini', renderXwStats(stats.mini));
@@ -877,6 +941,46 @@
             return 8; // Queen Bee
         }
 
+        function connectionsFallbackIcon(src) {
+            const name = (src.split('/').pop() || '').replace('.svg', '');
+            const colors = ['#f9df6d', '#a0c35a', '#b0c4ef', '#ba81c5'];
+            let solved = 0;
+            if (name === 'complete-won') solved = 4;
+            else if (name.startsWith('progress-')) solved = Math.max(0, Math.min(3, parseInt(name.slice(9), 10) || 0));
+
+            let shapes = '';
+            for (let r = 0; r < 4; r++) {
+                const y = 8 + r * 13;
+                if (name === 'unavailable') {
+                    for (let c = 0; c < 4; c++) {
+                        shapes += `<rect x="${8 + c * 13}" y="${y}" width="10" height="10" rx="2" fill="#cbd5e1" opacity="0.5"/>`;
+                    }
+                } else if (r < solved) {
+                    shapes += `<rect x="8" y="${y}" width="49" height="10" rx="2.5" fill="${colors[r]}"/>`;
+                } else {
+                    const fill = name === 'complete-lost' ? '#94a3b8' : '#1e293b';
+                    const op = name === 'complete-lost' ? '0.45' : '0.18';
+                    for (let c = 0; c < 4; c++) {
+                        shapes += `<rect x="${8 + c * 13}" y="${y}" width="10" height="10" rx="2" fill="${fill}" opacity="${op}"/>`;
+                    }
+                }
+            }
+            if (name === 'complete-lost') {
+                shapes += `<path d="M22 22 L42 42 M42 22 L22 42" stroke="#dc2626" stroke-width="5" stroke-linecap="round"/>`;
+            }
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${shapes}</svg>`;
+            return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        function handleProgressIconError(img, typeFolder) {
+            img.onerror = null;
+            if (typeFolder === 'connections') {
+                img.src = connectionsFallbackIcon(img.getAttribute('src') || '');
+            } else {
+                img.style.display = 'none';
+            }
+        }
+
         function getProgressImage(typeFolder, key) {
             const progress = userProgressMap[key];
             if (!progress || (!progress.ratio && !progress.completed)) {
@@ -894,6 +998,9 @@
                     // usedCheck is repurposed for Wordle: true = won, false = lost
                     return `static/wordle/${progress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
                 }
+                if (typeFolder === 'connections') {
+                    return `static/connections/${progress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
+                }
                 return `static/${typeFolder}/${progress.usedCheck ? 'complete' : 'complete-gold'}.svg`;
             }
 
@@ -902,6 +1009,11 @@
                 // count (0-5) rather than bucketing it like the fill-ratio types below.
                 const guessesUsed = Math.min(5, Math.round((progress.ratio || 0) * 6));
                 return `static/wordle/progress-${guessesUsed}.svg`;
+            }
+
+            if (typeFolder === 'connections') {
+                const solvedCount = Math.min(3, Math.round((progress.ratio || 0) * 4));
+                return `static/connections/progress-${solvedCount}.svg`;
             }
 
             const maxIdx = (typeFolder === 'mini') ? 4 : 9;
@@ -931,6 +1043,15 @@
                 return 'Lost';
             }
 
+            if (typeFolder === 'connections') {
+                // usedCheck: won/lost. timerSeconds is repurposed to hold mistakes (0-4).
+                if (progress.usedCheck) {
+                    const m = (progress.timerSeconds != null) ? progress.timerSeconds : 0;
+                    return m === 0 ? 'Perfect' : `${m} err`;
+                }
+                return 'Lost';
+            }
+
             if (typeFolder === 'spelling-bee') {
                 // timerSeconds is repurposed for Spelling Bee to hold the score.
                 return `${progress.timerSeconds ?? 0} pts`;
@@ -948,6 +1069,10 @@
                 window.location.href = `/spelling-bee/${year}/${month}/${dayKey}`;
                 return;
             }
+            if (publisher === 'Connections') {
+                window.location.href = `/connections/${year}/${month}/${dayKey}`;
+                return;
+            }
             window.location.href = `/play/${encodeURIComponent(publisher)}/${year}/${month}/${encodeURIComponent(dayKey)}`;
         }
 
@@ -959,6 +1084,7 @@
             { publisher: 'NY Times', puzzleName: 'The Mini',      suffix: '-mini', bgColor: 'background-color: #96bdfa;', typeFolder: 'mini' },
             { publisher: 'SpellingBee', puzzleName: 'Spelling Bee', suffix: '',    bgColor: 'background-color: #f7da21;', typeFolder: 'spelling-bee' },
             { publisher: 'Wordle',   puzzleName: 'Wordle',        suffix: '',      bgColor: 'background-color: #d4d6da;', typeFolder: 'wordle' },
+            { publisher: 'Connections', puzzleName: 'Connections', suffix: '',     bgColor: 'background-color: #b2a7f9;', typeFolder: 'connections' },
         ];
 
         function renderRows() {
@@ -1003,7 +1129,7 @@
                                     <span class="primary-date">${dateString}</span>
                                 </div>
                                 <div class="card-img-container">
-                                    <img src="${imgSrc}" alt="Icon" onerror="this.style.display='none'">
+                                    <img src="${imgSrc}" alt="Icon" onerror="handleProgressIconError(this, '${config.typeFolder}')">
                                     ${isAvailable && statLabel ? `<span class="stat-label">${statLabel}</span>` : ''}
                                 </div>
                             </button>
@@ -1012,7 +1138,7 @@
                         rowHtml += `
                             <button onclick="${onclick}" class="card small" style="${config.bgColor}">
                                 <div class="card-img-container">
-                                    <img src="${imgSrc}" alt="Icon" onerror="this.style.display='none'">
+                                    <img src="${imgSrc}" alt="Icon" onerror="handleProgressIconError(this, '${config.typeFolder}')">
                                 </div>
                                 <span class="small-day">${weekdayFull}</span>
                                 ${statLabel ? `<span class="small-stat">${statLabel}</span>` : ''}
@@ -1026,23 +1152,6 @@
                 allRowsHTML += rowHtml;
             });
 
-            const connectsCardHTML = `
-                <div class="table-responsive mt-3 mb-6">
-                    <div class="row" style="grid-template-columns: 300px;">
-                        <button onclick="window.location.href='https://www.nytimes.com/games/connections'" class="card primary" style="background-color: #b2a7f9;">
-                            <div class="primary-content">
-                                <span class="primary-title">Connections</span>
-                                <span class="primary-subtitle">Play in the app</span>
-                            </div>
-                            <div class="card-img-container">
-                                <img src="static/connections.svg" alt="Icon" onerror="this.style.display='none'">
-                            </div>
-                        </button>
-                    </div>
-                </div>
-            `;
-
-            allRowsHTML += connectsCardHTML;
             container.innerHTML = allRowsHTML;
         }
 

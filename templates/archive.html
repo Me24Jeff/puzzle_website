@@ -169,27 +169,30 @@
     </main>
 
     <!-- Floating Bottom Navigation Dock -->
-    <nav class="fixed tab-dock bg-white/90 dark:bg-neutral-800/90 border border-slate-200 dark:border-neutral-700 rounded-2xl p-1.5 flex items-center gap-2 z-50 backdrop-blur-md"
+    <nav class="fixed tab-dock bg-white/90 dark:bg-neutral-800/90 border border-slate-200 dark:border-neutral-700 rounded-2xl p-1.5 flex items-center gap-1.5 z-50 backdrop-blur-md"
          style="bottom: max(1.5rem, calc(1rem + env(safe-area-inset-bottom)));">
         <button id="tab-crossword" onclick="switchCategory('normal')" class="tab-item text-slate-700 dark:text-slate-300" title="The Crossword">
-            <img src="../static/normal/progress-0.svg" width="25" height="25">
+            <img src="/static/normal/progress-0.svg" width="25" height="25">
         </button>
 
         <button id="tab-midi" onclick="switchCategory('midi')" class="tab-item active text-slate-700 dark:text-slate-300" title="The Midi">
-            <img src="../static/midi/progress-0.svg" width="25", height="25">
+            <img src="/static/midi/progress-0.svg" width="25" height="25">
         </button>
 
         <button id="tab-mini" onclick="switchCategory('mini')" class="tab-item text-slate-700 dark:text-slate-300" title="The Mini">
-            <img src="../static/mini/progress-0.svg" width="25", height="25">
-
+            <img src="/static/mini/progress-0.svg" width="25" height="25">
         </button>
 
         <button id="tab-wordle" onclick="switchCategory('wordle')" class="tab-item text-slate-700 dark:text-slate-300" title="Wordle">
-            <img src="../static/wordle/progress-0.svg" width="25" height="25">
+            <img src="/static/wordle/progress-0.svg" width="25" height="25">
         </button>
 
         <button id="tab-spelling-bee" onclick="switchCategory('spelling-bee')" class="tab-item text-slate-700 dark:text-slate-300" title="Spelling Bee">
-            <img src="../static/spelling-bee/progress-0.svg" width="25" height="25">
+            <img src="/static/spelling-bee/progress-0.svg" width="25" height="25">
+        </button>
+
+        <button id="tab-connections" onclick="switchCategory('connections')" class="tab-item text-slate-700 dark:text-slate-300" title="Connections">
+            <img src="/static/connections.svg" width="25" height="25" onerror="this.onerror=null;this.src=connectionsFallbackIcon('progress-4')">
         </button>
     </nav>
 
@@ -205,7 +208,8 @@
             midi:          { title: "The Midi",      suffix: "-midi", publisher: "NY Times" },
             mini:          { title: "The Mini",      suffix: "-mini", publisher: "NY Times" },
             wordle:        { title: "Wordle",        suffix: "",      publisher: "Wordle" },
-            'spelling-bee':{ title: "Spelling Bee",  suffix: "",      publisher: "SpellingBee" }
+            'spelling-bee':{ title: "Spelling Bee",  suffix: "",      publisher: "SpellingBee" },
+            connections:   { title: "Connections",   suffix: "",      publisher: "Connections" }
         };
 
         // Spelling Bee's progress icons are keyed by rank tier rather than a
@@ -426,6 +430,46 @@
             }
         });
 
+        function connectionsFallbackIcon(src) {
+            const name = (src.split('/').pop() || '').replace('.svg', '');
+            const colors = ['#f9df6d', '#a0c35a', '#b0c4ef', '#ba81c5'];
+            let solved = 0;
+            if (name === 'complete-won' || name === 'progress-4') solved = 4;
+            else if (name.startsWith('progress-')) solved = Math.max(0, Math.min(3, parseInt(name.slice(9), 10) || 0));
+
+            let shapes = '';
+            for (let r = 0; r < 4; r++) {
+                const y = 8 + r * 13;
+                if (name === 'unavailable') {
+                    for (let c = 0; c < 4; c++) {
+                        shapes += `<rect x="${8 + c * 13}" y="${y}" width="10" height="10" rx="2" fill="#cbd5e1" opacity="0.5"/>`;
+                    }
+                } else if (r < solved) {
+                    shapes += `<rect x="8" y="${y}" width="49" height="10" rx="2.5" fill="${colors[r]}"/>`;
+                } else {
+                    const fill = name === 'complete-lost' ? '#94a3b8' : '#64748b';
+                    const op = name === 'complete-lost' ? '0.45' : '0.28';
+                    for (let c = 0; c < 4; c++) {
+                        shapes += `<rect x="${8 + c * 13}" y="${y}" width="10" height="10" rx="2" fill="${fill}" opacity="${op}"/>`;
+                    }
+                }
+            }
+            if (name === 'complete-lost') {
+                shapes += `<path d="M22 22 L42 42 M42 22 L22 42" stroke="#dc2626" stroke-width="5" stroke-linecap="round"/>`;
+            }
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${shapes}</svg>`;
+            return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        function handleArchiveIconError(img, cat) {
+            img.onerror = null;
+            if (cat === 'connections') {
+                img.src = connectionsFallbackIcon(img.getAttribute('src') || '');
+            } else if (img.alt !== 'Unavailable') {
+                img.style.display = 'none';
+            }
+        }
+
         // Mirrors index.html's getProgressImage(), so archive icons look
         // exactly like the ones on the dashboard.
         function getProgressImage(dayProgress) {
@@ -444,6 +488,9 @@
                     // usedCheck is repurposed for Wordle: true = won, false = lost
                     return `/static/wordle/${dayProgress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
                 }
+                if (currentCategory === 'connections') {
+                    return `/static/connections/${dayProgress.usedCheck ? 'complete-won' : 'complete-lost'}.svg`;
+                }
                 return `/static/${currentCategory}/${dayProgress.usedCheck ? 'complete' : 'complete-gold'}.svg`;
             }
 
@@ -452,6 +499,11 @@
                 // count (0-5) rather than bucketing it like the fill-ratio types below.
                 const guessesUsed = Math.min(5, Math.round((dayProgress.ratio || 0) * 6));
                 return `/static/wordle/progress-${guessesUsed}.svg`;
+            }
+
+            if (currentCategory === 'connections') {
+                const solvedCount = Math.min(3, Math.round((dayProgress.ratio || 0) * 4));
+                return `/static/connections/progress-${solvedCount}.svg`;
             }
 
             const maxIdx = (currentCategory === 'mini') ? 4 : 9;
@@ -512,9 +564,9 @@
 
                 let iconHtml;
                 if (isUnavailable) {
-                    iconHtml = `<img src="/static/${currentCategory}/unavailable.svg" alt="Unavailable">`;
+                    iconHtml = `<img src="/static/${currentCategory}/unavailable.svg" alt="Unavailable" onerror="handleArchiveIconError(this, '${currentCategory}')">`;
                 } else {
-                    iconHtml = `<img src="${getProgressImage(dayProgress)}" alt="Progress" onerror="this.style.display='none'">`;
+                    iconHtml = `<img src="${getProgressImage(dayProgress)}" alt="Progress" onerror="handleArchiveIconError(this, '${currentCategory}')">`;
                 }
 
                 dayCell.innerHTML = `
@@ -538,6 +590,8 @@
                             window.location.href = `/wordle/${year}/${monthKey}/${dayNum}?${backParam}`;
                         } else if (currentCategory === 'spelling-bee') {
                             window.location.href = `/spelling-bee/${year}/${monthKey}/${dayNum}?${backParam}`;
+                        } else if (currentCategory === 'connections') {
+                            window.location.href = `/connections/${year}/${monthKey}/${dayNum}?${backParam}`;
                         } else {
                             const suffix = CATEGORIES[currentCategory].suffix;
                             const dayKey = dayNum + suffix;

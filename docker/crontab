@@ -10,6 +10,9 @@
 # so this is comfortably after NYT has published it).
 10  18  *  *  *  /app/scripts/wordle_daily.sh >> /app/data/logs/cron.log 2>&1
 
+# Connections: fetch tomorrow's puzzle at 18:10 ET (no subscription needed).
+10  18  *  *  *  /app/scripts/connections_daily.sh >> /app/data/logs/cron.log 2>&1
+
 # Crosswords:
 # Run early at 18:10 on Saturday (gets Sunday's puzzle) and Sunday (gets Monday's puzzle)
 10  18  *  *  6,0  /app/scripts/crosswords_daily.sh >> /app/data/logs/cron.log 2>&1
