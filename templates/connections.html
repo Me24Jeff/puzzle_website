@@ -57,9 +57,9 @@
             color: #0f172a;
             border: none;
             border-radius: 10px;
-            min-height: 70px;
-            aspect-ratio: 1.15 / 1;
-            padding: 6px 5px;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            padding: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -70,8 +70,10 @@
             letter-spacing: -0.01em;
             cursor: pointer;
             user-select: none;
-            overflow-wrap: anywhere;
+            overflow: hidden;
+            overflow-wrap: normal;
             word-break: normal;
+            white-space: normal;
             transition: transform 0.1s ease, background-color 0.15s ease, color 0.15s ease;
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
@@ -275,8 +277,8 @@
             </div>
         </div>
         {% else %}
-        <main class="flex-1 min-h-0 flex flex-col items-center justify-center px-3 py-3 overflow-y-auto">
-            <div class="w-full max-w-[540px] flex flex-col gap-3">
+        <main class="flex-1 min-h-0 flex flex-col items-center px-3 py-3 overflow-y-auto">
+            <div class="w-full max-w-[540px] my-auto flex flex-col gap-3">
                 <p class="text-center text-sm font-semibold text-slate-600 dark:text-neutral-400 select-none">
                     Create four groups of four!
                 </p>
@@ -379,11 +381,19 @@
         let isWon = false;
         let busy = false;
 
+        const PUZZLE_NUMBER = (() => {
+            if (typeof PUZZLE.puzzle_number === 'number') return PUZZLE.puzzle_number;
+            const d = Date.UTC(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            const epoch = Date.UTC(2023, 5, 12); // 2023-06-12 = #1
+            const num = Math.round((d - epoch) / 86400000) + 1;
+            return num >= 1 ? num : PUZZLE.id;
+        })();
+
         // --- Header date label ---
         (function renderDateLabel() {
             const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
             const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-            document.getElementById('puzzle-date').textContent = PUZZLE.id ? `${label} · #${PUZZLE.id}` : label;
+            document.getElementById('puzzle-date').textContent = PUZZLE_NUMBER ? `${label} · #${PUZZLE_NUMBER}` : label;
         })();
 
         function escapeHtml(str) {
@@ -400,20 +410,28 @@
             setTimeout(() => toast.remove(), 2200);
         }
 
-        function tileFontSize(text) {
-            if (!text) return '0.88rem';
+        function initialTileFontSize(text) {
+            if (!text) return 15;
             // Emoji-only tiles look great larger
             const noSpaces = text.replace(/\s+/g, '');
             if (/^[\p{Emoji}\uFE0F\u200D]+$/u.test(noSpaces) && [...noSpaces].length <= 4) {
-                return '1.75rem';
+                return 28;
             }
             const words = text.trim().split(/\s+/);
             const longestWord = Math.max(...words.map(w => w.length));
-            const totalLen = text.length;
-            if (longestWord >= 12 || totalLen >= 20) return '0.66rem';
-            if (longestWord >= 9 || totalLen >= 14) return '0.74rem';
-            if (longestWord >= 7 || totalLen >= 10) return '0.82rem';
-            return '0.92rem';
+            if (longestWord >= 12) return 11;
+            if (longestWord >= 9 || text.length >= 16) return 12.5;
+            if (longestWord >= 7 || text.length >= 10) return 13.5;
+            return 15;
+        }
+
+        function fitTileText(btn) {
+            let size = parseFloat(btn.style.fontSize) || 15;
+            const minSize = 8;
+            while (size > minSize && (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1)) {
+                size -= 0.5;
+                btn.style.fontSize = `${size}px`;
+            }
         }
 
         function renderBannerElement(cat, animatePop) {
@@ -476,17 +494,19 @@
                         img.onerror = () => {
                             btn.classList.remove('is-image');
                             btn.textContent = card.altText || '?';
-                            btn.style.fontSize = tileFontSize(btn.textContent);
+                            btn.style.fontSize = `${initialTileFontSize(btn.textContent)}px`;
+                            fitTileText(btn);
                         };
                         btn.appendChild(img);
                     } else {
                         btn.textContent = card.content;
-                        btn.style.fontSize = tileFontSize(card.content);
+                        btn.style.fontSize = `${initialTileFontSize(card.content)}px`;
                     }
 
                     btn.onclick = () => toggleTile(id, btn);
                     btn.addEventListener('mousedown', e => e.preventDefault());
                     gridEl.appendChild(btn);
+                    if (!card.imageUrl) fitTileText(btn);
                 });
             }
 
@@ -707,7 +727,7 @@
 
             const dateStr = `${meta.year}-${meta.month}-${meta.day}`;
             document.getElementById('modal-puzzle-meta').textContent =
-                PUZZLE.id ? `Puzzle #${PUZZLE.id} · ${dateStr}` : dateStr;
+                PUZZLE_NUMBER ? `Puzzle #${PUZZLE_NUMBER} · ${dateStr}` : dateStr;
             document.getElementById('modal-guess-grid').innerHTML = renderGuessGridHtml();
             document.getElementById('modal-mistakes').textContent = `${mistakes}/${MAX_MISTAKES}`;
             document.getElementById('result-modal').classList.remove('hidden');
@@ -718,8 +738,8 @@
         }
 
         async function copyShareResult() {
-            const header = PUZZLE.id
-                ? `Connections #${PUZZLE.id}`
+            const header = PUZZLE_NUMBER
+                ? `Connections #${PUZZLE_NUMBER}`
                 : `Connections ${meta.year}-${meta.month}-${meta.day}`;
             const rows = guessHistory
                 .map(g => (g.levels || []).map(l => LEVEL_EMOJIS[l] || '⬜').join(''))
@@ -742,6 +762,13 @@
             } else if (e.key === 'Escape') {
                 deselectAll();
             }
+        });
+
+        window.addEventListener('resize', () => {
+            document.querySelectorAll('#tile-grid .conn-tile:not(.is-image)').forEach(btn => {
+                btn.style.fontSize = `${initialTileFontSize(btn.textContent)}px`;
+                fitTileText(btn);
+            });
         });
 
         function loadProgress() {

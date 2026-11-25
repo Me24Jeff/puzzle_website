@@ -150,11 +150,12 @@ def normalize_puzzle(raw: dict, target_date: date) -> dict:
                 idx += 1
 
     payload = {
+        "id": (date_obj - FIRST_PUZZLE_DATE).days + 1,
         "date": date_obj.isoformat(),
         "categories": categories,
     }
     if raw.get("id") is not None:
-        payload["id"] = raw["id"]
+        payload["nyt_id"] = raw["id"]
     if raw.get("editor"):
         payload["editor"] = str(raw["editor"]).strip()
 
