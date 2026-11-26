@@ -799,8 +799,8 @@
                 body: JSON.stringify({
                     userGrid: { foundWords: foundWords },
                     timerSeconds: score,               // repurposed: current score
-                    ratio: Math.min(1, Math.max(score / MAX_POINTS, RANKS[currentRankIndex()].pct)),
-                    completed: score >= MAX_POINTS,
+                    ratio: MAX_POINTS > 0 ? Math.min(1, Math.max(score / MAX_POINTS, RANKS[currentRankIndex()].pct)) : 0,
+                    completed: MAX_POINTS > 0 && score >= MAX_POINTS,
                     usedCheck: celebratedRank === "Queen Bee"
                 })
             }).then(r => {
@@ -819,7 +819,15 @@
 
         function loadProgress(saved) {
             if (saved && saved.userGrid && Array.isArray(saved.userGrid.foundWords)) {
-                foundWords = saved.userGrid.foundWords.filter(w => ANSWERS.has(w));
+                const seen = new Set();
+                foundWords = [];
+                for (const raw of saved.userGrid.foundWords) {
+                    const w = String(raw || '').toUpperCase();
+                    if (ANSWERS.has(w) && !seen.has(w)) {
+                        seen.add(w);
+                        foundWords.push(w);
+                    }
+                }
                 score = foundWords.reduce((sum, w) => sum + scoreForWord(w), 0);
                 if (score >= Math.round(RANKS.find(r => r.name === "Queen Bee").pct * MAX_POINTS)) celebratedRank = "Queen Bee";
                 else if (score >= Math.round(RANKS.find(r => r.name === "Genius").pct * MAX_POINTS)) celebratedRank = "Genius";

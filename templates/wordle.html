@@ -480,17 +480,23 @@
             setTimeout(() => toast.remove(), 2500);
         }
 
-        function saveProgress() {
+        let pendingFlipState = null;
+
+        function saveProgress(keepalive, override) {
+            const st = override || {
+                guesses, results, gameOver, isWon
+            };
             const saveUrl = `/api/progress/Wordle/${meta.year}/${meta.month}/${meta.day}`;
             fetch(saveUrl, {
                 method: 'POST',
+                keepalive: !!keepalive,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    userGrid: { guesses: guesses, results: results, hard: hardMode },
-                    timerSeconds: guesses.length,   // repurposed for Wordle: number of guesses used
-                    ratio: guesses.length / MAX_ATTEMPTS,
-                    completed: gameOver,
-                    usedCheck: isWon   // repurposed for Wordle: true = won, false = lost
+                    userGrid: { guesses: st.guesses, results: st.results, hard: hardMode },
+                    timerSeconds: st.guesses.length,   // repurposed for Wordle: number of guesses used
+                    ratio: st.guesses.length / MAX_ATTEMPTS,
+                    completed: st.gameOver,
+                    usedCheck: st.isWon   // repurposed for Wordle: true = won, false = lost
                 })
             }).then(r => {
                 if (r.status === 401) showToast('Signed out - progress not saved. Please log in again.');
@@ -591,6 +597,11 @@
             }
 
             const result = computeResult(guess);
+            const nextGuesses = [...guesses, guess];
+            const nextResults = [...results, result];
+            const nextWon = guess === TARGET;
+            const nextOver = nextWon || currentRow === MAX_ATTEMPTS - 1;
+            pendingFlipState = { guesses: nextGuesses, results: nextResults, gameOver: nextOver, isWon: nextWon };
             busy = true;   // until the flip finishes: no typing, deleting or re-submitting (a 2nd Enter used to count the guess twice)
 
             const STAGGER_DELAY = 250;
@@ -608,6 +619,7 @@
 
             const totalAnimationTime = ((WORD_LENGTH - 1) * STAGGER_DELAY) + FLIP_DURATION + 100;
             setTimeout(() => {
+                pendingFlipState = null;
                 applyKeyboardState(guess, result);
 
                 guesses.push(guess);
@@ -628,10 +640,23 @@
             }, totalAnimationTime);
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && pendingFlipState) {
+                saveProgress(true, pendingFlipState);
+                pendingFlipState = null;
+            }
+        });
+        window.addEventListener('pagehide', () => {
+            if (pendingFlipState) {
+                saveProgress(true, pendingFlipState);
+                pendingFlipState = null;
+            }
+        });
+
         function finishGame(won) {
             gameOver = true;
             isWon = won;
-            saveProgress();
+            saveProgress(true);
 
             if (won) {
                 showToast(`Solved in ${guesses.length}/${MAX_ATTEMPTS}!`);

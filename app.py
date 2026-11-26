@@ -299,9 +299,14 @@ def init_db():
             cursor.execute("ALTER TABLE progress ADD COLUMN auto_check INTEGER DEFAULT 0")
 
         # Make the admin flag mirror ADMIN_USERNAMES exactly.
-        cursor.execute('UPDATE users SET is_admin = 0')
-        for name in ADMIN_USERNAMES:
-            cursor.execute('UPDATE users SET is_admin = 1 WHERE LOWER(username) = ?', (name,))
+        if ADMIN_USERNAMES:
+            placeholders = ','.join('?' for _ in ADMIN_USERNAMES)
+            cursor.execute(
+                f'UPDATE users SET is_admin = CASE WHEN LOWER(username) IN ({placeholders}) THEN 1 ELSE 0 END',
+                tuple(ADMIN_USERNAMES),
+            )
+        else:
+            cursor.execute('UPDATE users SET is_admin = 0')
 
 
 init_db()
@@ -662,6 +667,7 @@ def register():
 
             cursor.execute('INSERT INTO users (username, password_hash, avatar) VALUES (?, ?, ?)', (username, hashed, '🧩'))
             user_id = cursor.lastrowid
+        clear_login_failures(username)
         _log_in(user_id)
         return jsonify({'status': 'success'})
     except sqlite3.IntegrityError:
@@ -793,6 +799,7 @@ def admin_reset_password():
             (generate_password_hash(temp_password), target_id)
         )
 
+    clear_login_failures(row[0])
     print(f"[admin] user id {admin_id} reset the password of user id {target_id} ({row[0]})", flush=True)
     resp = jsonify({'status': 'success', 'username': row[0], 'tempPassword': temp_password})
     resp.headers['Cache-Control'] = 'no-store'

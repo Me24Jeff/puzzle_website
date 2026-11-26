@@ -574,23 +574,7 @@
 
             users.forEach(u => {
                 let statusBadge = '';
-                if (currentFriendsSubTab === 'connections') {
-                // Winners first (fewest mistakes), then losses, then in-progress (most groups), then not started.
-                const rank3 = u => u.completed && u.usedCheck ? 0 : (u.completed ? 1 : (u.hasStarted ? 2 : 3));
-                users = [...users].sort((a, b) => {
-                    const r = rank3(a) - rank3(b);
-                    if (r !== 0) return r;
-                    if (rank3(a) === 0) {
-                        const ma = a.timerSeconds ?? 0, mb = b.timerSeconds ?? 0;
-                        if (ma !== mb) return ma - mb;
-                    } else if (rank3(a) === 2) {
-                        if ((b.ratio || 0) !== (a.ratio || 0)) return (b.ratio || 0) - (a.ratio || 0);
-                    }
-                    return a.username.localeCompare(b.username);
-                });
-            }
-
-            if (currentFriendsSubTab === 'spelling-bee') {
+                if (currentFriendsSubTab === 'spelling-bee') {
                     if (u.hasStarted) {
                         const rankName = beeRankName(u.ratio || 0);
                         const top = rankName === 'Genius' || rankName === 'Queen Bee';
@@ -869,6 +853,7 @@
             if (res.ok) {
                 _jsonCache.clear();
                 currentUsername = data.username;
+                updateGreeting(currentUsername);
                 document.getElementById('account-username-display').textContent = `@${data.username}`;
                 input.value = '';
                 msg.textContent = 'Username updated successfully!';
@@ -1169,12 +1154,6 @@
                     const currentDate = new Date(anchorDate);
                     currentDate.setDate(anchorDate.getDate() - i);
 
-                    const isFeatured = (i === 0);
-                    const isActualToday = (
-                        currentDate.getFullYear() === today.getFullYear() &&
-                        currentDate.getMonth() === today.getMonth() &&
-                        currentDate.getDate() === today.getDate()
-                    );
                     const year = currentDate.getFullYear();
                     const month = String(currentDate.getMonth() + 1).padStart(2, '0');
                     const dayNum = currentDate.getDate();
@@ -1188,7 +1167,7 @@
 
                     const weekdayFull = currentDate.toLocaleDateString('en-US', { weekday: 'long' });
 
-                    if (isActualToday) {
+                    if (i === 0) {
                         const monthShort = currentDate.toLocaleDateString('en-US', { month: 'short' });
                         const dateString = `${weekdayFull}, ${dayNum} ${monthShort}`;
                         const isAvailable = todayAvailable[config.typeFolder] !== false;

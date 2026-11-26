@@ -28,7 +28,8 @@ import argparse
 import os
 import re
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -38,14 +39,15 @@ WORDLE_API = "https://www.nytimes.com/svc/wordle/v2/{date}.json"
 RECORD_SIZE = 17
 DEFAULT_OUTPUT = "puzzles/wordle_words.txt"
 _WORD_RE = re.compile(r"^[A-Z]{5}$")
+NYT_TZ = ZoneInfo("America/New_York")
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 
-def fetch_wordle(target_date):
+def fetch_wordle(session, target_date):
     url = WORDLE_API.format(date=target_date.isoformat())
-    r = get_with_retries(requests, url, headers={"User-Agent": USER_AGENT}, timeout=15)
+    r = get_with_retries(session, url, timeout=15)
     r.raise_for_status()
     data = r.json()
     word = str(data["solution"]).strip().upper()
@@ -107,8 +109,8 @@ def inspect_file(path):
     return first, last
 
 
-def _append_one(path, d):
-    word = fetch_wordle(d)
+def _append_one(session, path, d):
+    word = fetch_wordle(session, d)
     record = format_record(d, word)
     with open(path, "ab") as f:
         f.write(record.encode("utf-8"))
@@ -117,9 +119,9 @@ def _append_one(path, d):
     print(f"  {d}: {word}")
 
 
-def _overwrite_one(path, first, d):
+def _overwrite_one(session, path, first, d):
     """Replace the record for `d` (already inside the file) with a freshly fetched one."""
-    word = fetch_wordle(d)
+    word = fetch_wordle(session, d)
     record = format_record(d, word)
     index = (d - first).days
     with open(path, "r+b") as f:
@@ -138,7 +140,9 @@ def append_wordle(path, target_date, force=False):
 
     if first is not None and first <= target_date <= last:
         if force:
-            _overwrite_one(path, first, target_date)
+            with requests.Session() as session:
+                session.headers.update({"User-Agent": USER_AGENT})
+                _overwrite_one(session, path, first, target_date)
         else:
             print(f"  {target_date} already recorded, skipping (use --force to re-fetch it)")
         return
@@ -148,26 +152,28 @@ def append_wordle(path, target_date, force=False):
               "into the middle of a fixed-offset file. Skipping.")
         return
 
-    # Backfill any gap so every day in between still gets an offset.
-    if last is not None:
-        d = last + timedelta(days=1)
-        while d < target_date:
-            _append_one(path, d)
-            d += timedelta(days=1)
+    with requests.Session() as session:
+        session.headers.update({"User-Agent": USER_AGENT})
+        # Backfill any gap so every day in between still gets an offset.
+        if last is not None:
+            d = last + timedelta(days=1)
+            while d < target_date:
+                _append_one(session, path, d)
+                d += timedelta(days=1)
 
-    _append_one(path, target_date)
+        _append_one(session, path, target_date)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fetch the NYT Wordle answer and append it to the app's word list.")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help=f"Path to wordle_words.txt (default: {DEFAULT_OUTPUT})")
-    parser.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    parser.add_argument("--date", help="YYYY-MM-DD (default: today, US/Eastern)")
     parser.add_argument("--force", action="store_true",
                          help="Re-fetch a date that is already in the file and overwrite its record in place")
     args = parser.parse_args()
 
     try:
-        target = date.fromisoformat(args.date) if args.date else date.today()
+        target = date.fromisoformat(args.date) if args.date else datetime.now(NYT_TZ).date()
     except ValueError:
         parser.error(f"--date must be YYYY-MM-DD, got {args.date!r}")
 

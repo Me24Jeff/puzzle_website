@@ -196,7 +196,8 @@ def main():
     output_dir = Path(args.output_dir)
 
     existing = output_path(output_dir, target_date)
-    if existing.exists() and not args.overwrite:
+    yesterday_existing = output_path(output_dir, target_date - timedelta(days=1))
+    if not args.overwrite and existing.exists() and (args.date or yesterday_existing.exists()):
         print(f"[{target_date}] already saved -> {existing}, skipping")
         return
 

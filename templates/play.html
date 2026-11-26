@@ -728,7 +728,14 @@
     function placeInitialCursor() {
         direction = lists.across.length ? 'across' : 'down';
         const first = lists[direction][0];
-        if (!first) return;
+        if (!first) {
+            for (let y = 0; y < puzzle.height; y++) {
+                for (let x = 0; x < puzzle.width; x++) {
+                    if (!puzzle.grid[y][x].block) { curRow = y; curCol = x; return; }
+                }
+            }
+            return;
+        }
         goTo(first.cells[0], direction);
         const open = firstOpenCell(first);
         if (open) { goTo(open); return; }
@@ -1363,7 +1370,7 @@
     // =====================================================================
     document.addEventListener('keydown', e => {
         if (!puzzle || e.ctrlKey || e.metaKey || e.altKey) return;
-        if (/^[a-zA-Z0-9]$/.test(e.key)) {
+        if (/^[\x21-\x7E]$/.test(e.key)) {
             typeLetter(e.key);
         } else if (e.key === 'Backspace' || e.key === 'Delete') {
             backspace(); e.preventDefault();

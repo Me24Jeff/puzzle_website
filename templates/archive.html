@@ -306,6 +306,7 @@
         }
 
         function onSelectMonthYear(val) {
+            if (!val || !val.includes('-')) return;
             const [y, m] = val.split('-').map(Number);
             currentDate = new Date(y, m, 1);
             loadArchiveDataAndRender();
@@ -404,6 +405,20 @@
             if (cat !== currentCategory ||
                 year !== currentDate.getFullYear() ||
                 month1 !== currentDate.getMonth() + 1) return;
+
+            const start = getStart(cat);
+            const minDate = new Date(start.year, start.month, 1);
+            const now = new Date();
+            const maxDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            if (currentDate < minDate || currentDate > maxDate) {
+                currentDate = currentDate < minDate ? minDate : maxDate;
+                try {
+                    bundle = await getBundle(cat, currentDate.getFullYear(), currentDate.getMonth() + 1);
+                } catch (err) {
+                    bundle = null;
+                }
+                if (cat !== currentCategory) return;
+            }
 
             if (bundle) {
                 archiveProgressData = bundle.progress || {};

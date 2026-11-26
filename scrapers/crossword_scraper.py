@@ -129,12 +129,7 @@ def build_session(nyt_s_cookie):
 # --------------------------------------------------------------------------
 # Fetching, mirrors nyt.py's get_puzzle() / get_puzzle_from_id()
 # --------------------------------------------------------------------------
-def get_puzzle_from_id(session, puzzle_id):
-    puzzle_url = f"https://www.nytimes.com/svc/crosswords/v6/puzzle/{puzzle_id}.json"
-    r = get_with_retries(session, puzzle_url)
-    r.raise_for_status()
-    new_format = r.json()
-
+def _parse_v6_payload(new_format):
     resp = new_format["body"][0]
     resp["meta"] = {}
     for cur in ["publicationDate", "title", "editor", "copyright", "constructors", "notes"]:
@@ -144,6 +139,13 @@ def get_puzzle_from_id(session, puzzle_id):
     resp["dimensions"]["columnCount"] = resp["dimensions"]["width"]
     resp["dimensions"]["rowCount"] = resp["dimensions"]["height"]
     return resp
+
+
+def get_puzzle_from_id(session, puzzle_id):
+    puzzle_url = f"https://www.nytimes.com/svc/crosswords/v6/puzzle/{puzzle_id}.json"
+    r = get_with_retries(session, puzzle_url)
+    r.raise_for_status()
+    return _parse_v6_payload(r.json())
 
 
 def get_puzzle(session, url):
@@ -170,6 +172,8 @@ def get_puzzle(session, url):
     r2 = get_with_retries(session, meta_url)
     r2.raise_for_status()
     metadata = r2.json()
+    if isinstance(metadata.get("body"), list) and metadata["body"]:
+        return _parse_v6_payload(metadata)
     if "id" not in metadata:
         raise RuntimeError(f"Unexpected response from {meta_url}: missing 'id'")
 
@@ -185,9 +189,15 @@ def _clue_text(clues_lookup, idx):
     entry = clues_lookup[idx]
     t = entry.get("text", "")
     if isinstance(t, list):
-        t = t[0] if t else ""
-    if isinstance(t, dict):
-        t = t.get("plain", "")
+        parts = []
+        for item in t:
+            if isinstance(item, dict):
+                parts.append(item.get("formatted") or item.get("plain") or "")
+            elif isinstance(item, str):
+                parts.append(item)
+        t = "".join(parts)
+    elif isinstance(t, dict):
+        t = t.get("formatted") or t.get("plain") or ""
     return html.unescape(t or "")
 
 
