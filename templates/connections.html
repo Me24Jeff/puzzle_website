@@ -59,24 +59,33 @@
             border-radius: 8px;
             width: 100%;
             aspect-ratio: 1 / 1;
-            padding: 4px;
+            padding: 5px;
             display: flex;
             align-items: center;
             justify-content: center;
             text-align: center;
-            font-weight: 700;
+            font-weight: 800;
             text-transform: uppercase;
-            line-height: 1.1;
-            letter-spacing: -0.025em;
+            line-height: 1.08;
+            letter-spacing: -0.03em;
             cursor: pointer;
             user-select: none;
             overflow: hidden;
+            transition: background-color 0.15s ease, color 0.15s ease;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        .tile-label {
+            display: inline-block;
+            width: 110%;
+            max-width: 110%;
+            flex-shrink: 0;
+            transform: scaleX(0.9);
+            transform-origin: center;
             overflow-wrap: normal;
             word-break: normal;
             white-space: normal;
-            transition: transform 0.12s ease, background-color 0.15s ease, color 0.15s ease;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
+            pointer-events: none;
         }
         @media (prefers-color-scheme: dark) {
             .conn-tile {
@@ -108,7 +117,7 @@
         }
 
         .conn-tile.shake {
-            animation: tile-shake 0.48s ease-in-out;
+            animation: tile-shake 0.45s ease-in-out;
         }
         @keyframes tile-shake {
             0%, 100% { transform: translateX(0); }
@@ -116,16 +125,6 @@
             40% { transform: translateX(5px); }
             60% { transform: translateX(-4px); }
             80% { transform: translateX(4px); }
-        }
-
-        .conn-tile.hop {
-            animation: tile-hop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
-        }
-        @keyframes tile-hop {
-            0% { transform: translateY(0); }
-            45% { transform: translateY(-13px); }
-            78% { transform: translateY(3px); }
-            100% { transform: translateY(0); }
         }
 
         .cat-banner {
@@ -141,11 +140,19 @@
             box-sizing: border-box;
         }
         .cat-banner.pop {
-            animation: banner-pop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: banner-pop 400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        .cat-banner.pop .cat-banner-content {
+            animation: banner-content-fade 320ms ease 60ms both;
         }
         @keyframes banner-pop {
-            0% { opacity: 0; transform: scale(0.95); }
-            100% { opacity: 1; transform: scale(1); }
+            0%   { opacity: 0.25; transform: scale(1); }
+            45%  { opacity: 1;    transform: scale(1.035); }
+            100% { opacity: 1;    transform: scale(1); }
+        }
+        @keyframes banner-content-fade {
+            0%   { opacity: 0; }
+            100% { opacity: 1; }
         }
 
         .mistake-dot {
@@ -417,18 +424,18 @@
         }
 
         function initialTileFontSize(text) {
-            if (!text) return 14;
+            if (!text) return 15.5;
             // Emoji-only tiles look great larger
             const noSpaces = text.replace(/\s+/g, '');
             if (/^[\p{Emoji}\uFE0F\u200D]+$/u.test(noSpaces) && [...noSpaces].length <= 4) {
-                return 26;
+                return 28;
             }
             const words = text.trim().split(/\s+/);
             const longestWord = Math.max(...words.map(w => w.length));
-            if (longestWord >= 12) return 10.5;
-            if (longestWord >= 9 || text.length >= 16) return 11.5;
-            if (longestWord >= 7 || text.length >= 10) return 12.5;
-            return 14;
+            if (longestWord >= 12) return 11.5;
+            if (longestWord >= 9 || text.length >= 16) return 13;
+            if (longestWord >= 7 || text.length >= 10) return 14;
+            return 15.5;
         }
 
         function syncBannerSize() {
@@ -441,9 +448,11 @@
         }
 
         function fitTileText(btn) {
-            let size = parseFloat(btn.style.fontSize) || 15;
+            const label = btn.querySelector('.tile-label');
+            if (!label) return;
+            let size = parseFloat(btn.style.fontSize) || 15.5;
             const minSize = 8;
-            while (size > minSize && (btn.scrollWidth > btn.clientWidth + 1 || btn.scrollHeight > btn.clientHeight + 1)) {
+            while (size > minSize && (label.scrollWidth > label.clientWidth + 1 || label.getBoundingClientRect().height > btn.clientHeight - 8)) {
                 size -= 0.5;
                 btn.style.fontSize = `${size}px`;
             }
@@ -468,11 +477,18 @@
                 membersHtml = `<div class="flex flex-wrap items-center justify-center gap-1.5 mt-1">${items}</div>`;
             } else {
                 const names = cat.cards.map(c => c.content || c.altText).join(', ');
-                membersHtml = `<p class="text-xs sm:text-sm font-normal uppercase tracking-tight mt-0.5 leading-tight">${escapeHtml(names)}</p>`;
+                membersHtml = `<p class="text-xs sm:text-sm font-medium uppercase tracking-tight mt-0.5 leading-tight">${escapeHtml(names)}</p>`;
             }
 
-            div.innerHTML = `<p class="text-sm sm:text-base font-bold uppercase tracking-tight leading-tight">${escapeHtml(cat.title)}</p>${membersHtml}`;
+            div.innerHTML = `<div class="cat-banner-content w-full"><p class="text-sm sm:text-base font-extrabold uppercase tracking-tight leading-tight">${escapeHtml(cat.title)}</p>${membersHtml}</div>`;
             return div;
+        }
+
+        function createTileLabel(text) {
+            const span = document.createElement('span');
+            span.className = 'tile-label';
+            span.textContent = text;
+            return span;
         }
 
         function renderBoard(popLevel = null) {
@@ -509,13 +525,14 @@
                         img.className = 'max-h-[76%] max-w-[82%] object-contain pointer-events-none';
                         img.onerror = () => {
                             btn.classList.remove('is-image');
-                            btn.textContent = card.altText || '?';
-                            btn.style.fontSize = `${initialTileFontSize(btn.textContent)}px`;
+                            btn.innerHTML = '';
+                            btn.appendChild(createTileLabel(card.altText || '?'));
+                            btn.style.fontSize = `${initialTileFontSize(card.altText || '?')}px`;
                             fitTileText(btn);
                         };
                         btn.appendChild(img);
                     } else {
-                        btn.textContent = card.content;
+                        btn.appendChild(createTileLabel(card.content));
                         btn.style.fontSize = `${initialTileFontSize(card.content)}px`;
                     }
 
@@ -618,7 +635,14 @@
             }).catch(e => console.error('Error saving progress:', e));
         }
 
-        function submitGuess() {
+        function runAnim(el, keyframes, options) {
+            if (typeof el.animate === 'function') {
+                return el.animate(keyframes, options).finished.catch(() => {});
+            }
+            return new Promise(resolve => setTimeout(resolve, (options.delay || 0) + (options.duration || 0)));
+        }
+
+        async function submitGuess() {
             if (gameOver || busy || selectedIds.size !== 4) return;
 
             const picked = [...selectedIds];
@@ -633,39 +657,53 @@
             busy = true;
             updateControlsUI();
 
-            // Hop animation on the 4 selected tiles in visual (top-to-bottom, left-to-right) order
+            // Phase 1: Smooth eased hop wave across the 4 selected tiles (top-to-bottom, left-to-right)
             const pickedSet = new Set(picked);
             const selectedEls = unsolvedOrder
                 .filter(id => pickedSet.has(id))
                 .map(id => document.querySelector(`.conn-tile[data-card-id="${id}"]`))
                 .filter(Boolean);
 
-            selectedEls.forEach((el, idx) => {
-                setTimeout(() => el.classList.add('hop'), idx * 80);
-            });
+            await Promise.all(selectedEls.map((el, idx) =>
+                runAnim(el, [
+                    { transform: 'translateY(0)' },
+                    { transform: 'translateY(-11px)', offset: 0.45 },
+                    { transform: 'translateY(0)' }
+                ], {
+                    duration: 320,
+                    delay: idx * 75,
+                    easing: 'cubic-bezier(0.37, 0, 0.63, 1)'
+                })
+            ));
 
-            const hopWait = (selectedEls.length - 1) * 80 + 380;
-            setTimeout(() => {
-                selectedEls.forEach(el => el.classList.remove('hop'));
+            const firstLevel = levels[0];
+            const allSame = levels.every(l => l === firstLevel);
 
-                const firstLevel = levels[0];
-                const allSame = levels.every(l => l === firstLevel);
+            if (allSame) {
+                // Phase 2: 1-to-1 smooth swap into the top row (0..3), keeping banner hidden
+                const topSlots = [0, 1, 2, 3];
+                const displacedIndices = topSlots.filter(i => i < unsolvedOrder.length && !pickedSet.has(unsolvedOrder[i]));
+                const incomingIndices = [];
+                for (let i = 4; i < unsolvedOrder.length; i++) {
+                    if (pickedSet.has(unsolvedOrder[i])) incomingIndices.push(i);
+                }
 
-                if (allSame) {
-                    // Snapshot positions before re-rendering for smooth FLIP glide
+                if (displacedIndices.length > 0) {
                     const prevTileRects = new Map();
                     document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
                         prevTileRects.set(el.dataset.cardId, el.getBoundingClientRect());
                     });
 
-                    solvedLevels.push(firstLevel);
-                    unsolvedOrder = unsolvedOrder.filter(id => !pickedSet.has(id));
-                    selectedIds.clear();
+                    const swappedOrder = [...unsolvedOrder];
+                    for (let k = 0; k < displacedIndices.length; k++) {
+                        const topIdx = displacedIndices[k];
+                        const lowIdx = incomingIndices[k];
+                        [swappedOrder[topIdx], swappedOrder[lowIdx]] = [swappedOrder[lowIdx], swappedOrder[topIdx]];
+                    }
+                    unsolvedOrder = swappedOrder;
+                    renderBoard();
 
-                    renderBoard(firstLevel);
-
-                    // Glide remaining tiles smoothly into their new grid slots
-                    const movedEls = [];
+                    const swapAnims = [];
                     document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
                         const prev = prevTileRects.get(el.dataset.cardId);
                         if (!prev) return;
@@ -673,65 +711,67 @@
                         const dx = prev.left - next.left;
                         const dy = prev.top - next.top;
                         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-                            el.style.transition = 'none';
-                            el.style.transform = `translate(${dx}px, ${dy}px)`;
-                            movedEls.push(el);
+                            const id = Number(el.dataset.cardId);
+                            el.style.zIndex = pickedSet.has(id) ? '20' : '10';
+                            swapAnims.push(
+                                runAnim(el, [
+                                    { transform: `translate(${dx}px, ${dy}px)` },
+                                    { transform: 'translate(0, 0)' }
+                                ], {
+                                    duration: 460,
+                                    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+                                }).then(() => { el.style.zIndex = ''; })
+                            );
                         }
                     });
-                    if (movedEls.length > 0) {
-                        void document.body.offsetWidth;
-                        requestAnimationFrame(() => {
-                            movedEls.forEach(el => {
-                                el.style.transition = 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)';
-                                el.style.transform = '';
-                                el.addEventListener('transitionend', () => {
-                                    el.style.transition = '';
-                                }, { once: true });
-                            });
-                        });
-                    }
-
-                    setTimeout(() => {
-                        busy = false;
-                        updateControlsUI();
-                        if (solvedLevels.length === 4) {
-                            finishGame(true);
-                        } else {
-                            saveProgress();
-                        }
-                    }, movedEls.length > 0 ? 380 : 120);
-                    return;
+                    await Promise.all(swapAnims);
                 }
 
-                // Incorrect guess: check for 3-of-4 ("One away...")
-                const counts = {};
-                levels.forEach(l => { counts[l] = (counts[l] || 0) + 1; });
-                const isOneAway = Object.values(counts).some(c => c === 3);
+                // Phase 3 & 4: Replace top row with category banner (color pop + label/words fade-in)
+                solvedLevels.push(firstLevel);
+                unsolvedOrder = unsolvedOrder.filter(id => !pickedSet.has(id));
+                selectedIds.clear();
+                renderBoard(firstLevel);
 
-                selectedEls.forEach(el => {
-                    el.classList.remove('shake');
-                    void el.offsetWidth;
-                    el.classList.add('shake');
-                });
+                await new Promise(resolve => setTimeout(resolve, 420));
+                busy = false;
+                updateControlsUI();
+                if (solvedLevels.length === 4) {
+                    finishGame(true);
+                } else {
+                    saveProgress();
+                }
+                return;
+            }
 
-                mistakes++;
-                updateMistakesUI();
+            // Incorrect guess: check for 3-of-4 ("One away...")
+            const counts = {};
+            levels.forEach(l => { counts[l] = (counts[l] || 0) + 1; });
+            const isOneAway = Object.values(counts).some(c => c === 3);
 
-                setTimeout(() => {
-                    selectedEls.forEach(el => el.classList.remove('shake'));
-                    busy = false;
+            selectedEls.forEach(el => {
+                el.classList.remove('shake');
+                void el.offsetWidth;
+                el.classList.add('shake');
+            });
 
-                    if (mistakes >= MAX_MISTAKES) {
-                        selectedIds.clear();
-                        showToast('Next time!');
-                        finishGame(false);
-                    } else {
-                        if (isOneAway) showToast('One away...');
-                        updateControlsUI();
-                        saveProgress();
-                    }
-                }, 480);
-            }, hopWait);
+            mistakes++;
+            updateMistakesUI();
+
+            setTimeout(() => {
+                selectedEls.forEach(el => el.classList.remove('shake'));
+                busy = false;
+
+                if (mistakes >= MAX_MISTAKES) {
+                    selectedIds.clear();
+                    showToast('Next time!');
+                    finishGame(false);
+                } else {
+                    if (isOneAway) showToast('One away...');
+                    updateControlsUI();
+                    saveProgress();
+                }
+            }, 460);
         }
 
         function winVerdict(m) {
@@ -821,7 +861,9 @@
         window.addEventListener('resize', () => {
             syncBannerSize();
             document.querySelectorAll('#tile-grid .conn-tile:not(.is-image)').forEach(btn => {
-                btn.style.fontSize = `${initialTileFontSize(btn.textContent)}px`;
+                const label = btn.querySelector('.tile-label');
+                const text = label ? label.textContent : btn.textContent;
+                btn.style.fontSize = `${initialTileFontSize(text)}px`;
                 fitTileText(btn);
             });
         });
