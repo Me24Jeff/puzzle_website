@@ -351,6 +351,9 @@
 
     const rawMeta = JSON.parse(document.getElementById('puzzle-meta').textContent);
     const meta = (rawMeta && rawMeta.publisher) ? rawMeta : parsePlayMetaFromUrl();
+    if (meta.publisher && meta.year) {
+        document.title = `${meta.publisher} · ${meta.year}-${meta.month}-${meta.day_key}`;
+    }
 
     let puzzle = null;
     let lists = { across: [], down: [] };     // clues per direction, in number order
@@ -947,6 +950,9 @@
         }
 
         puzzle = boot.puzzle;
+        if (puzzle.title) {
+            document.title = puzzle.title;
+        }
         const saved = boot.saved || {};
         hasSavedRow = Object.keys(saved).length > 0;
 

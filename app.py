@@ -591,6 +591,8 @@ def _compute_sw_version():
     h = hashlib.sha256()
     files = [
         os.path.join(app.root_path, 'sw.js'),
+        os.path.join(app.root_path, 'templates', '_sw.html'),
+        os.path.join(app.root_path, 'templates', '_viewport_fix.html'),
         os.path.join(app.root_path, 'templates', 'wordle.html'),
         os.path.join(app.root_path, 'templates', 'spelling-bee.html'),
         os.path.join(app.root_path, 'templates', 'connections.html'),
@@ -1249,7 +1251,8 @@ def get_puzzle_days_in_month(publisher, suffix, year, month_padded):
     return get_crossword_days_in_month(publisher, suffix, year, month_padded)
 
 
-_ARCHIVE_RANGE_CACHE = {}
+_ARCHIVE_RANGE_CACHE = {}  # type_folder -> (expires_monotonic, result)
+_ARCHIVE_CACHE_TTL = 60.0
 
 
 def _crossword_file_matches_suffix(fname, suffix):
@@ -1265,8 +1268,10 @@ def get_puzzle_available_range(type_folder):
     """Returns ((min_year, min_month), None) where (min_year, min_month) is the
     earliest month with at least one puzzle for this archive type, or
     (None, None) if nothing is on disk yet."""
-    if type_folder in _ARCHIVE_RANGE_CACHE:
-        return _ARCHIVE_RANGE_CACHE[type_folder]
+    now = time.monotonic()
+    cached = _ARCHIVE_RANGE_CACHE.get(type_folder)
+    if cached and cached[0] > now:
+        return cached[1]
 
     config = TYPE_FOLDER_CONFIG.get(type_folder)
     if not config:
@@ -1291,7 +1296,7 @@ def get_puzzle_available_range(type_folder):
             month_path = os.path.join(year_path, month_str)
             if any(_crossword_file_matches_suffix(f, suffix) for f in os.listdir(month_path)):
                 res = ((year, month), None)
-                _ARCHIVE_RANGE_CACHE[type_folder] = res
+                _ARCHIVE_RANGE_CACHE[type_folder] = (now + _ARCHIVE_CACHE_TTL, res)
                 return res
 
     return None, None
@@ -1787,34 +1792,43 @@ def api_game_connections(year, month, day):
 # ---------------------------------------------------------------------------
 # Raw puzzle APIs (no longer used by the bundled pages, kept for other clients)
 # ---------------------------------------------------------------------------
+_PUZZLES_LIST_CACHE = (0.0, None)
+
+
 @app.route('/api/puzzles-list')
 def puzzles_list():
+    global _PUZZLES_LIST_CACHE
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    index = {}
-    if os.path.isdir(CROSSWORDS_DIR):
-        for pub_entry in os.scandir(CROSSWORDS_DIR):
-            if not pub_entry.is_dir():
-                continue
-            pub_dict = {}
-            for year_entry in os.scandir(pub_entry.path):
-                if not (year_entry.is_dir() and year_entry.name.isdigit()):
+    now = time.monotonic()
+    if _PUZZLES_LIST_CACHE[1] is not None and _PUZZLES_LIST_CACHE[0] > now:
+        index = _PUZZLES_LIST_CACHE[1]
+    else:
+        index = {}
+        if os.path.isdir(CROSSWORDS_DIR):
+            for pub_entry in os.scandir(CROSSWORDS_DIR):
+                if not pub_entry.is_dir():
                     continue
-                year_dict = {}
-                for month_entry in os.scandir(year_entry.path):
-                    if not (month_entry.is_dir() and month_entry.name.isdigit()):
+                pub_dict = {}
+                for year_entry in os.scandir(pub_entry.path):
+                    if not (year_entry.is_dir() and year_entry.name.isdigit()):
                         continue
-                    days = {
-                        f.name[:-len('.json')]: True
-                        for f in os.scandir(month_entry.path)
-                        if f.is_file() and f.name.endswith('.json')
-                    }
-                    if days:
-                        year_dict[month_entry.name] = days
-                if year_dict:
-                    pub_dict[year_entry.name] = year_dict
-            if pub_dict:
-                index[pub_entry.name] = pub_dict
+                    year_dict = {}
+                    for month_entry in os.scandir(year_entry.path):
+                        if not (month_entry.is_dir() and month_entry.name.isdigit()):
+                            continue
+                        days = {
+                            f.name[:-len('.json')]: True
+                            for f in os.scandir(month_entry.path)
+                            if f.is_file() and f.name.endswith('.json')
+                        }
+                        if days:
+                            year_dict[month_entry.name] = days
+                    if year_dict:
+                        pub_dict[year_entry.name] = year_dict
+                if pub_dict:
+                    index[pub_entry.name] = pub_dict
+        _PUZZLES_LIST_CACHE = (now + _ARCHIVE_CACHE_TTL, index)
     resp = jsonify(index)
     resp.headers['Cache-Control'] = 'private, max-age=3600'
     return resp

@@ -694,6 +694,7 @@
                         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
                             const id = Number(el.dataset.cardId);
                             el.style.zIndex = pickedSet.has(id) ? '20' : '10';
+                            el.style.transition = 'none';
                             el.style.willChange = 'transform';
                             el.style.transform = `translate(${dx}px, ${dy}px)`;
                             movers.push({ el, dx, dy });
@@ -717,6 +718,7 @@
                             return animPromise.then(() => {
                                 el.style.zIndex = '';
                                 el.style.willChange = '';
+                                el.style.transition = '';
                             });
                         });
                         await Promise.all(swapAnims);
