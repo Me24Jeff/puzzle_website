@@ -19,7 +19,7 @@
     <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
     <meta name="color-scheme" content="light dark">
-    <title>Spelling Bee &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <title>Spelling Bee</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = { darkMode: 'media' }
@@ -271,15 +271,14 @@
             </button>
         </header>
 
-        {% if puzzle_unavailable %}
-        <div class="flex-1 flex items-center justify-center p-6">
+        <div id="unavailable-view" class="hidden flex-1 flex items-center justify-center p-6">
             <div class="text-center max-w-sm">
                 <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
                 <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or doesn't have a Spelling Bee puzzle yet.</p>
             </div>
         </div>
-        {% else %}
 
+        <div id="game-view" class="flex-1 min-h-0 flex flex-col">
         <!-- Rank / progress bar (clickable to show Rankings modal) -->
         <div onclick="openRankingsModal()" class="px-4 pt-3 shrink-0 flex items-center gap-3 cursor-pointer select-none">
             <span id="rank-label" class="font-bold text-slate-900 dark:text-white shrink-0">Beginner</span>
@@ -310,11 +309,11 @@
                 <button class="ctrl-btn enter" onclick="handleAction('ENTER')">Enter</button>
             </div>
         </div>
-        {% endif %}
+        </div>
     </div>
 
-    <script id="bee-meta" type="application/json">
-        {{ {"year": year, "month": month, "day": day} | tojson }}
+    <script id="bee-boot" type="application/json">
+        {{ (boot or none) | tojson }}
     </script>
 
     <script>
@@ -331,21 +330,38 @@
         }
     </script>
 
-    {% if not puzzle_unavailable %}
-    <script id="bee-puzzle" type="application/json">
-        {{ puzzle | tojson }}
-    </script>
     <script>
-        const meta = JSON.parse(document.getElementById('bee-meta').textContent);
-        const PUZZLE = JSON.parse(document.getElementById('bee-puzzle').textContent);
-        // This user's saved words for the day, embedded by the server (no fetch needed).
-        const SAVED = {{ (saved or {}) | tojson }};
+        function parseDateFromUrl() {
+            const m = window.location.pathname.match(/^\/spelling-bee\/(\d{4})\/(\d{1,2})\/(\d{1,2})\/?$/);
+            if (!m) return { year: '', month: '', day: '' };
+            return {
+                year: m[1].padStart(4, '0'),
+                month: m[2].padStart(2, '0'),
+                day: m[3].padStart(2, '0')
+            };
+        }
 
-        const CENTER = PUZZLE.center_letter.toUpperCase();
-        const OUTER = PUZZLE.outer_letters.map(l => l.toUpperCase());
-        const ALL_LETTERS = new Set([CENTER, ...OUTER]);
-        const ANSWERS = new Set(PUZZLE.answers.map(w => w.toUpperCase()));
-        const MAX_POINTS = PUZZLE.max_points;
+        function escapeHtml(str) {
+            return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        const BOOT = (() => {
+            try { return JSON.parse(document.getElementById('bee-boot').textContent); } catch (e) { return null; }
+        })();
+        const meta = (BOOT && BOOT.year) ? { year: BOOT.year, month: BOOT.month, day: BOOT.day } : parseDateFromUrl();
+        if (meta.year) {
+            document.title = `Spelling Bee · ${meta.year}-${meta.month}-${meta.day}`;
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            document.getElementById('puzzle-date').textContent =
+                d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        }
+
+        let CENTER = "";
+        let OUTER = ["", "", "", "", "", ""];
+        let ALL_LETTERS = new Set();
+        let ANSWERS = new Set();
+        let MAX_POINTS = 100;
+        let gameReady = false;
 
         const RANKS = [
             { name: "Beginner",   pct: 0.00 },
@@ -379,13 +395,6 @@
             if (isPangram(word)) pts += 7;
             return pts;
         }
-
-        // --- Date label ---
-        (function renderDateLabel() {
-            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
-            document.getElementById('puzzle-date').textContent =
-                d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-        })();
 
         // --- Build the hive ---
         const hive = document.getElementById('hive');
@@ -444,6 +453,7 @@
         }
 
         function addLetter(letter, btnEl) {
+            if (!gameReady || !letter) return;
             clearBadWordIfNeeded();
             currentWord += letter;
             renderWord();
@@ -540,6 +550,7 @@
         }
 
         function handleAction(action) {
+            if (!gameReady) return;
             if (action === "DEL") {
                 if (clearOnNextInput) {
                     clearBadWordIfNeeded();
@@ -558,6 +569,7 @@
         document.querySelectorAll(".ctrl-btn").forEach(b => b.addEventListener("mousedown", (e) => e.preventDefault()));
 
         document.addEventListener("keydown", (e) => {
+            if (!gameReady) return;
             // Leave browser/OS shortcuts (Ctrl+R, Cmd+C, Alt+Left ...) alone.
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (e.key === "Enter") { e.preventDefault(); handleAction("ENTER"); return; }
@@ -687,6 +699,7 @@
         }
 
         function openRankingsModal() {
+            if (!gameReady) return;
             renderRankingsModal();
             document.getElementById('rankings-modal').classList.remove('hidden');
         }
@@ -727,7 +740,12 @@
                 grid.innerHTML = `<p class="text-slate-400 dark:text-neutral-500 font-medium italic">Words you find will appear here.</p>`;
                 return;
             }
-            labelEl.textContent = recentWords.map(w => w.toLowerCase()).join(", ");
+            labelEl.innerHTML = recentWords.map(w => {
+                const lower = escapeHtml(w.toLowerCase());
+                return isPangram(w)
+                    ? `<span class="text-amber-500 dark:text-amber-400 font-bold">${lower}</span>`
+                    : lower;
+            }).join(', ');
 
             const sortedWords = [...foundWords].sort((a, b) =>
                 a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -799,8 +817,7 @@
         });
         window.addEventListener('pagehide', () => saveProgress(true));
 
-        function loadProgress() {
-            const saved = SAVED;
+        function loadProgress(saved) {
             if (saved && saved.userGrid && Array.isArray(saved.userGrid.foundWords)) {
                 foundWords = saved.userGrid.foundWords.filter(w => ANSWERS.has(w));
                 score = foundWords.reduce((sum, w) => sum + scoreForWord(w), 0);
@@ -811,11 +828,48 @@
             renderWordlist();
         }
 
+        function applyBoot(data) {
+            if (!data || data.unavailable || !data.puzzle) {
+                document.getElementById('game-view').classList.add('hidden');
+                document.getElementById('unavailable-view').classList.remove('hidden');
+                return;
+            }
+            const puzzle = data.puzzle;
+            CENTER = puzzle.center_letter.toUpperCase();
+            OUTER = puzzle.outer_letters.map(l => l.toUpperCase());
+            ALL_LETTERS = new Set([CENTER, ...OUTER]);
+            ANSWERS = new Set(puzzle.answers.map(w => w.toUpperCase()));
+            MAX_POINTS = puzzle.max_points;
+
+            buildHive();
+            gameReady = true;
+            renderWord();
+            loadProgress(data.saved || {});
+        }
+
         renderWord();
         renderScore();
         renderWordlist();
-        loadProgress();
+
+        (async function init() {
+            if (BOOT) {
+                applyBoot(BOOT);
+                return;
+            }
+            if (!meta.year) {
+                applyBoot({ unavailable: true });
+                return;
+            }
+            try {
+                const res = await fetch(`/api/game/spelling-bee/${meta.year}/${meta.month}/${meta.day}`, { cache: 'no-store' });
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                if (!res.ok) { showToast('Could not load puzzle.'); return; }
+                applyBoot(await res.json());
+            } catch (e) {
+                console.error('Error loading Spelling Bee:', e);
+                showToast('Could not load puzzle.');
+            }
+        })();
     </script>
-    {% endif %}
 </body>
 </html>

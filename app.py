@@ -87,7 +87,8 @@ app.config.update(
     SEND_FILE_MAX_AGE_DEFAULT=timedelta(days=7),
 )
 
-PUZZLE_DIR = "puzzles/xwords"
+PUZZLE_DIR = "puzzles/crosswords"
+CROSSWORDS_DIR = "puzzles/crosswords"
 DB_PATH = "puzzle_progress.db"
 
 # Admins are configured with a comma-separated list of usernames, e.g.
@@ -98,14 +99,6 @@ ADMIN_USERNAMES = {u.strip().lower() for u in os.environ.get('ADMIN_USERNAMES', 
 
 # Spelling Bee "Genius" rank starts at this fraction of the max points.
 BEE_GENIUS_RATIO = 0.70
-
-# Fallback folder for individually-scraped crosswords (see crossword_scraper.py).
-# PUZZLE_DIR/the master index is a pre-baked historical archive that isn't meant
-# to be appended to day-by-day. Instead, freshly-scraped puzzles are dropped in
-# here as one small JSON file per puzzle, already in the exact shape
-# build_puzzle_json() below produces. Any time a puzzle can't be found in the
-# master archive, we check here before giving up.
-CROSSWORD_FALLBACK_DIR = "puzzles/crosswords"
 
 # Fixed-width word list for Wordle ("YYYY-MM-DD WORD\n", 17 bytes per record).
 WORDLE_WORDS_FILE = "puzzles/wordle_words.txt"
@@ -139,7 +132,7 @@ TYPE_FOLDER_CONFIG = {
     'connections':  {'publisher': CONNECTIONS_PUBLISHER, 'suffix': '',},
 }
 
-for _d in (PUZZLE_DIR, CROSSWORD_FALLBACK_DIR, SPELLING_BEE_DIR, CONNECTIONS_DIR):
+for _d in (CROSSWORDS_DIR, SPELLING_BEE_DIR, CONNECTIONS_DIR):
     os.makedirs(_d, exist_ok=True)
 
 
@@ -386,204 +379,55 @@ def get_saved_progress(user_id, publisher, year, month, day_key):
 
 
 # ---------------------------------------------------------------------------
-# Master puzzle archive (puzzles/xwords)
+# Puzzle JSON loaders (crosswords, spelling bee, connections)
 # ---------------------------------------------------------------------------
-MASTER_INDEX = None
-_HEADER = None
-
-
-def make_json_safe(obj):
-    if isinstance(obj, bytes):
-        return obj.decode('utf-8', errors='ignore')
-    if isinstance(obj, dict):
-        return {str(k): make_json_safe(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [make_json_safe(item) for item in obj]
-    return obj
-
-
-def get_data(num, start, length, mode='json', header=None):
-    filename = os.path.join(PUZZLE_DIR, f"xwords_data_{num:02d}.dat")
-    # Read only the bytes we need. (This used to read the whole multi-MB .dat
-    # file into memory and then slice a few KB out of it, on every request.)
-    try:
-        with open(filename, 'rb') as f:
-            f.seek(start)
-            data = f.read(length)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Puzzle data file {filename} not found locally.")
-
-    if header is not None:
-        data = header + data
-
-    if mode == 'json':
-        return json.loads(data)
-    elif mode == 'raw':
-        return data
-    elif mode == 'gzip':
-        decompressed = gzip.decompress(data)
-        return json.loads(decompressed)
-    else:
-        raise Exception("Invalid mode")
-
-
-def get_header():
-    """Shared gzip header for every puzzle in the archive - read once."""
-    global _HEADER
-    if _HEADER is None:
-        meta = get_data(0, 22, 78)
-        _HEADER = get_data(*meta[5:8], mode='raw')
-    return _HEADER
-
-
-def get_master_index():
-    global MASTER_INDEX
-    if MASTER_INDEX is None:
-        meta = get_data(0, 22, 78)
-        raw_index = get_data(*meta[2:5], mode='gzip', header=get_header())
-        MASTER_INDEX = make_json_safe(raw_index)
-    return MASTER_INDEX
-
-
-def build_puzzle_json(name, puz_data):
-    width, height, cells, clues = puz_data[0], puz_data[1], puz_data[2], puz_data[3]
-    meta = puz_data[6] if len(puz_data) > 6 else {}
-
-    circled = set()
-    for x, y, flags in meta.get("flags", []):
-        if "circle" in flags.split(","):
-            circled.add((x, y))
-
-    grid = []
-    for y in range(height):
-        row = []
-        for x in range(width):
-            cell = cells[y][x]
-            if cell == 0:
-                row.append({"block": True})
-            else:
-                row.append({
-                    "block": False,
-                    "solution": cell.upper() if cell else "",
-                    "circled": (x, y) in circled,
-                })
-        grid.append(row)
-
-    def walk(x, y, direction):
-        dx, dy = (1, 0) if direction == 0 else (0, 1)
-        cx, cy, spanned = x, y, []
-        while 0 <= cx < width and 0 <= cy < height and cells[cy][cx] != 0:
-            spanned.append([cx, cy])
-            cx += dx
-            cy += dy
-        return spanned
-
-    across, down = [], []
-    for clue_text, direction, number, x, y, *_ in clues:
-        span = walk(x, y, direction)
-        entry = {
-            "number": number, "text": clue_text,
-            "row": y, "col": x, "length": len(span), "cells": span,
-        }
-        (across if direction == 0 else down).append(entry)
-
-    across.sort(key=lambda c: c["number"])
-    down.sort(key=lambda c: c["number"])
-
-    return {
-        "title": meta.get("title") or name,
-        "author": meta.get("author", ""),
-        "width": width,
-        "height": height,
-        "grid": grid,
-        "clues": {"across": across, "down": down},
-    }
-
-
 DEFAULT_CROSSWORD_BLURB = "Crack the clues in today's puzzle."
 
 
-def get_puzzle_title(puz_data):
-    meta = puz_data[6] if len(puz_data) > 6 else {}
-    return meta.get("title") or DEFAULT_CROSSWORD_BLURB
+@lru_cache(maxsize=512)
+def _read_dated_json_file(path, mtime_ns):
+    # mtime is part of the cache key, so a re-scraped puzzle is picked up
+    # immediately while repeat plays and stats pages avoid re-reading disk.
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return data if isinstance(data, dict) else None
 
 
-@lru_cache(maxsize=256)
-def _load_master_puzzle(publisher, year, month, day_key):
-    """Puzzle from the historical archive. These never change, so the built
-    JSON is memoised (exceptions - i.e. 'not in the archive' - aren't cached)."""
-    master = get_master_index()
-    info = master[publisher][year][month][day_key]
-    puz_data = get_data(*info, mode='gzip', header=get_header())
-    return build_puzzle_json(f"{publisher} - {year}-{month}-{day_key}", puz_data)
+def _load_json_path(path):
+    try:
+        mtime_ns = os.stat(path).st_mtime_ns
+        return _read_dated_json_file(path, mtime_ns)
+    except (OSError, ValueError):
+        return None      # missing, unreadable, or a corrupt/partial JSON file
 
 
-_TITLE_CACHE = {}
-
-
-def _master_title(publisher, year, month, day_key):
-    key = (publisher, year, month, day_key)
-    if key in _TITLE_CACHE:
-        return _TITLE_CACHE[key]
-    master = get_master_index()
-    info = master[publisher][year][month][day_key]
-    puz_data = get_data(*info, mode='gzip', header=get_header())
-    title = get_puzzle_title(puz_data)
-    if len(_TITLE_CACHE) > 512:
-        _TITLE_CACHE.clear()
-    _TITLE_CACHE[key] = title
-    return title
-
-
-# --- Fallback folder helpers (scraped puzzles not in the master archive) ---
-
-def fallback_puzzle_path(publisher, year, month, day_key):
-    """Path of a scraped puzzle's JSON file. publisher/year/month/day_key come
+def crossword_puzzle_path(publisher, year, month, day_key):
+    """Path of a crossword's JSON file. publisher/year/month/day_key come
     straight from the URL, so they are validated hard: anything that could
-    escape CROSSWORD_FALLBACK_DIR (".." or slashes) raises ValueError."""
+    escape CROSSWORDS_DIR (".." or slashes) raises ValueError."""
     if not (_SAFE_NAME_RE.match(str(publisher)) and _SAFE_DAY_KEY_RE.match(str(day_key))):
         raise ValueError("invalid puzzle reference")
     path = os.path.join(
-        CROSSWORD_FALLBACK_DIR, publisher, str(int(year)), f"{int(month):02d}", f"{day_key}.json"
+        CROSSWORDS_DIR, publisher, str(int(year)), f"{int(month):02d}", f"{day_key}.json"
     )
-    # Belt and braces: whatever the regexes allowed, the resolved file must
-    # still live inside the fallback folder.
-    root = os.path.realpath(CROSSWORD_FALLBACK_DIR)
+    root = os.path.realpath(CROSSWORDS_DIR)
     if os.path.commonpath([root, os.path.realpath(path)]) != root:
         raise ValueError("invalid puzzle reference")
     return path
 
 
-def load_fallback_puzzle_json(publisher, year, month, day_key):
-    """Returns the pre-built puzzle JSON for a scraped puzzle, or None if
-    there isn't one on disk (or the reference / file is invalid)."""
-    try:
-        path = fallback_puzzle_path(publisher, year, month, day_key)
-        if os.path.isfile(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else None
-    except (ValueError, OSError):
-        # ValueError covers bad references AND a corrupt/partial JSON file.
-        return None
-    return None
-
-
 def load_puzzle(publisher, year, month, day_key):
-    """Returns (puzzle_json_or_None, is_immutable). Master-archive puzzles are
-    immutable (safe to cache for a long time); scraped ones can be rewritten."""
+    """Returns the crossword puzzle JSON dict, or None if missing/invalid."""
     try:
-        return _load_master_puzzle(publisher, year, month, day_key), True
-    except Exception:
-        pass  # Not in the master archive - fall through to the scraper's folder.
-    return load_fallback_puzzle_json(publisher, year, month, day_key), False
+        path = crossword_puzzle_path(publisher, year, month, day_key)
+    except ValueError:
+        return None
+    return _load_json_path(path)
 
 
-def get_fallback_puzzle_days(publisher, suffix, year, month_padded):
-    """Days (as ints) in the scraped-puzzle fallback folder for a given
-    publisher/type/year/month, mirroring get_puzzle_days_in_month() below
-    but scanning puzzles/crosswords instead of the master index."""
-    folder = os.path.join(CROSSWORD_FALLBACK_DIR, publisher, str(int(year)), month_padded)
+def get_crossword_days_in_month(publisher, suffix, year, month_padded):
+    """Days (as ints) in CROSSWORDS_DIR for a given publisher/type/year/month."""
+    folder = os.path.join(CROSSWORDS_DIR, publisher, str(int(year)), month_padded)
     if not os.path.isdir(folder):
         return []
 
@@ -597,14 +441,13 @@ def get_fallback_puzzle_days(publisher, suffix, year, month_padded):
                 continue
             day_part = day_key[:-len(suffix)]
         else:
-            # The 'normal' (no-suffix) type shouldn't swallow "-mini"/"-midi"
-            # files that just happen to also end in digits before the dash.
+            # The 'normal' (no-suffix) type shouldn't swallow "-mini"/"-midi" files.
             if '-' in day_key:
                 continue
             day_part = day_key
         if day_part.isdigit():
             days.append(int(day_part))
-    return days
+    return sorted(days)
 
 
 # ---------------------------------------------------------------------------
@@ -744,11 +587,34 @@ def optimize_response(resp):
     return resp
 
 
+def _compute_sw_version():
+    h = hashlib.sha256()
+    files = [
+        os.path.join(app.root_path, 'sw.js'),
+        os.path.join(app.root_path, 'templates', 'wordle.html'),
+        os.path.join(app.root_path, 'templates', 'spelling-bee.html'),
+        os.path.join(app.root_path, 'templates', 'connections.html'),
+        os.path.join(app.root_path, 'templates', 'play.html'),
+    ]
+    for path in files:
+        try:
+            with open(path, 'rb') as f:
+                h.update(f.read())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+_SW_VERSION = _compute_sw_version()
+
+
 @app.route('/sw.js')
 def service_worker():
     """Served from the site root so the worker's scope is the whole app (a
     worker served from /static/ can only control /static/)."""
-    resp = send_from_directory(app.root_path, 'sw.js', mimetype='application/javascript')
+    with open(os.path.join(app.root_path, 'sw.js'), 'r', encoding='utf-8') as f:
+        body = f.read().replace('__SW_VERSION__', _SW_VERSION)
+    resp = Response(body, mimetype='application/javascript')
     resp.headers['Service-Worker-Allowed'] = '/'
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
@@ -1353,20 +1219,21 @@ def _get_dated_json_available_range(base_dir):
     `base_dir`, or None if there aren't any yet."""
     if not os.path.isdir(base_dir):
         return None
-    min_ym = None
-    for year_str in os.listdir(base_dir):
+    years = sorted(
+        (int(y), y) for y in os.listdir(base_dir)
+        if y.isdigit() and os.path.isdir(os.path.join(base_dir, y))
+    )
+    for year, year_str in years:
         year_path = os.path.join(base_dir, year_str)
-        if not (year_str.isdigit() and os.path.isdir(year_path)):
-            continue
-        for month_str in os.listdir(year_path):
+        months = sorted(
+            (int(m), m) for m in os.listdir(year_path)
+            if m.isdigit() and os.path.isdir(os.path.join(year_path, m))
+        )
+        for month, month_str in months:
             month_path = os.path.join(year_path, month_str)
-            if not (month_str.isdigit() and os.path.isdir(month_path)):
-                continue
             if any(f.endswith('.json') for f in os.listdir(month_path)):
-                ym = (int(year_str), int(month_str))
-                if min_ym is None or ym < min_ym:
-                    min_ym = ym
-    return min_ym
+                return (year, month)
+    return None
 
 
 def get_spelling_bee_days_in_month(year, month_padded):
@@ -1378,45 +1245,26 @@ def get_spelling_bee_available_range():
 
 
 def get_puzzle_days_in_month(publisher, suffix, year, month_padded):
-    """Days (as ints) within a given year/month that have a puzzle indexed
-    for this publisher/suffix. The master index is loaded once and cached
-    in memory, so this is just a handful of dict lookups per call - cheap
-    even for sparse, decades-old months."""
-    try:
-        master = get_master_index()
-        days_dict = master.get(publisher, {}).get(str(year), {}).get(month_padded, {})
-    except Exception:
-        days_dict = {}
-
-    days = set()
-    for day_key in days_dict.keys():
-        if suffix:
-            if not day_key.endswith(suffix):
-                continue
-            day_part = day_key[:-len(suffix)]
-        else:
-            day_part = day_key
-        if day_part.isdigit():
-            days.add(int(day_part))
-
-    # Merge in anything sitting in the scraped-puzzle fallback folder too,
-    # so days that only exist there still show up (un-greyed) on the calendar.
-    days.update(get_fallback_puzzle_days(publisher, suffix, year, month_padded))
-
-    return sorted(days)
+    """Days (as ints) within a given year/month that have a puzzle JSON file."""
+    return get_crossword_days_in_month(publisher, suffix, year, month_padded)
 
 
 _ARCHIVE_RANGE_CACHE = {}
 
 
+def _crossword_file_matches_suffix(fname, suffix):
+    if not fname.endswith('.json'):
+        return False
+    day_key = fname[:-len('.json')]
+    if suffix:
+        return day_key.endswith(suffix) and day_key[:-len(suffix)].isdigit()
+    return day_key.isdigit()
+
+
 def get_puzzle_available_range(type_folder):
-    """Returns ((min_year, min_month), (max_year, max_month)) spanning every
-    month that has at least one puzzle for this archive type, or
-    (None, None) if nothing is indexed. Each puzzle type can have a very
-    different starting point - the classic Crossword goes back to 1942,
-    while the Midi and Mini are much newer - so this is computed per type
-    rather than per publisher. Cached since the master index doesn't
-    change during the life of the process."""
+    """Returns ((min_year, min_month), None) where (min_year, min_month) is the
+    earliest month with at least one puzzle for this archive type, or
+    (None, None) if nothing is on disk yet."""
     if type_folder in _ARCHIVE_RANGE_CACHE:
         return _ARCHIVE_RANGE_CACHE[type_folder]
 
@@ -1424,44 +1272,29 @@ def get_puzzle_available_range(type_folder):
     if not config:
         return None, None
 
-    publisher = config['publisher']
+    pub_dir = os.path.join(CROSSWORDS_DIR, config['publisher'])
     suffix = config['suffix']
-
-    try:
-        master = get_master_index()
-    except Exception:
+    if not os.path.isdir(pub_dir):
         return None, None
 
-    pub_data = master.get(publisher, {})
-    min_ym = None
-    max_ym = None
-    for year_str, months in pub_data.items():
-        if not str(year_str).isdigit():
-            continue
-        year = int(year_str)
-        for month_str, days in months.items():
-            if not str(month_str).isdigit():
-                continue
-            month = int(month_str)
-            matched = False
-            for day_key in days.keys():
-                if suffix:
-                    if day_key.endswith(suffix):
-                        matched = True
-                        break
-                else:
-                    if day_key.isdigit():
-                        matched = True
-                        break
-            if matched:
-                ym = (year, month)
-                if min_ym is None or ym < min_ym:
-                    min_ym = ym
-                if max_ym is None or ym > max_ym:
-                    max_ym = ym
+    years = sorted(
+        (int(y), y) for y in os.listdir(pub_dir)
+        if y.isdigit() and os.path.isdir(os.path.join(pub_dir, y))
+    )
+    for year, year_str in years:
+        year_path = os.path.join(pub_dir, year_str)
+        months = sorted(
+            (int(m), m) for m in os.listdir(year_path)
+            if m.isdigit() and os.path.isdir(os.path.join(year_path, m))
+        )
+        for month, month_str in months:
+            month_path = os.path.join(year_path, month_str)
+            if any(_crossword_file_matches_suffix(f, suffix) for f in os.listdir(month_path)):
+                res = ((year, month), None)
+                _ARCHIVE_RANGE_CACHE[type_folder] = res
+                return res
 
-    _ARCHIVE_RANGE_CACHE[type_folder] = (min_ym, max_ym)
-    return min_ym, max_ym
+    return None, None
 
 
 def get_archive_range_info(type_folder):
@@ -1627,6 +1460,35 @@ def archive_range(type_folder):
 # ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
+def _puzzle_info_for_date(p_type, cfg, target_date):
+    if p_type == 'wordle':
+        return (
+            get_wordle_word_for_date(target_date) is not None,
+            "Guess your way to the correct word.",
+        )
+    if p_type == 'spelling-bee':
+        exists = os.path.exists(os.path.join(
+            SPELLING_BEE_DIR, str(target_date.year),
+            f"{target_date.month:02d}", f"{target_date.day:02d}.json",
+        ))
+        return exists, "Make as many words as you can with 7 letters."
+    if p_type == 'connections':
+        exists = os.path.exists(os.path.join(
+            CONNECTIONS_DIR, str(target_date.year),
+            f"{target_date.month:02d}", f"{target_date.day:02d}.json",
+        ))
+        return exists, "Group words that share a common thread."
+
+    year = str(target_date.year)
+    month = f"{target_date.month:02d}"
+    day_key = f"{target_date.day:02d}{cfg['suffix']}"
+    puzzle = load_puzzle(cfg['publisher'], year, month, day_key)
+    if puzzle is not None:
+        title_text = "Solve the puzzle in seconds." if p_type == 'mini' else f"“{puzzle.get('title') or DEFAULT_CROSSWORD_BLURB}”"
+        return True, title_text
+    return False, ("Solve the puzzle in seconds." if p_type == 'mini' else DEFAULT_CROSSWORD_BLURB)
+
+
 @app.route('/')
 def index():
     user_id = session.get('user_id')
@@ -1638,101 +1500,123 @@ def index():
         session.clear()
         return redirect('/login')
 
-    today = datetime.now()
-    year = str(today.year)
-    month = f"{today.month:02d}"
-    day_base = f"{today.day:02d}"
-    today_date = today.date()
-
+    today_date = date.today()
     today_titles = {}
-    # Whether each type's *today* entry has actually been scraped yet. The
-    # scrapers fire on cron schedules in America/New_York (docker/crontab)
-    # while this container's clock is on a different TZ (see
-    # docker-compose.yml), so "today" here can roll over before/after the
-    # scraper has written that day's file. Checking the data directly stays
-    # correct regardless of either timezone.
     today_available = {}
+    latest_dates = {}
 
+    # Walk backwards up to 30 days if today's puzzle hasn't been scraped yet
+    # (e.g. due to timezone offset vs. America/New_York), so the dashboard
+    # shows the latest available puzzle instead of a grayed-out placeholder.
     for p_type, cfg in TYPE_FOLDER_CONFIG.items():
-        if p_type == 'wordle':
-            today_available[p_type] = get_wordle_word_for_date(today_date) is not None
-            today_titles[p_type] = "Guess your way to the correct word."
-            continue
-        if p_type == 'spelling-bee':
-            today_available[p_type] = os.path.exists(os.path.join(
-                SPELLING_BEE_DIR, str(today_date.year),
-                f"{today_date.month:02d}", f"{today_date.day:02d}.json"))
-            today_titles[p_type] = "Make as many words as you can with 7 letters."
-            continue
-        if p_type == 'connections':
-            today_available[p_type] = os.path.exists(os.path.join(
-                CONNECTIONS_DIR, str(today_date.year),
-                f"{today_date.month:02d}", f"{today_date.day:02d}.json"))
-            today_titles[p_type] = "Group words that share a common thread."
-            continue
+        found_avail = False
+        chosen_date = today_date
+        chosen_title = ""
+        for offset in range(31):
+            candidate = today_date - timedelta(days=offset)
+            avail, title = _puzzle_info_for_date(p_type, cfg, candidate)
+            if offset == 0:
+                chosen_title = title
+            if avail:
+                found_avail = True
+                chosen_date = candidate
+                chosen_title = title
+                break
+        today_available[p_type] = found_avail
+        today_titles[p_type] = chosen_title
+        latest_dates[p_type] = chosen_date.isoformat()
 
-        day_key = day_base + cfg['suffix']
-        publisher = cfg['publisher']
-        found = False
-        title_text = DEFAULT_CROSSWORD_BLURB
-        try:
-            title_text = f"“{_master_title(publisher, year, month, day_key)}”"
-            found = True
-        except Exception:
-            try:
-                fallback = load_fallback_puzzle_json(publisher, year, month, day_key)
-            except Exception:
-                fallback = None
-            if fallback is not None:
-                title_text = f"“{fallback.get('title') or DEFAULT_CROSSWORD_BLURB}”"
-                found = True
-
-        today_available[p_type] = found
-        today_titles[p_type] = "Solve the puzzle in seconds." if p_type == 'mini' else title_text
-
-    # The page needs the user's name/avatar and the last week or so of
-    # progress to draw itself; embed them instead of making the browser fetch
-    # /api/me and /api/progress after load.
-    since = (today_date - timedelta(days=10)).isoformat()
+    earliest_anchor = min(date.fromisoformat(d) for d in latest_dates.values())
+    since = (earliest_anchor - timedelta(days=10)).isoformat()
     boot = {'me': me, 'progress': get_progress_summary(user_id, since)}
 
     return render_template('index.html', today_titles=today_titles,
-                           today_available=today_available, boot=boot)
+                           today_available=today_available,
+                           latest_dates=latest_dates, boot=boot)
+
+
+# ---------------------------------------------------------------------------
+# App-shell routes (cached by the service worker; no user or puzzle data)
+# ---------------------------------------------------------------------------
+@app.route('/shell/wordle')
+def shell_wordle():
+    return render_template('wordle.html', boot=None)
+
+
+@app.route('/shell/spelling-bee')
+def shell_spelling_bee():
+    return render_template('spelling-bee.html', boot=None)
+
+
+@app.route('/shell/connections')
+def shell_connections():
+    return render_template('connections.html', boot=None)
+
+
+@app.route('/shell/play')
+def shell_play():
+    return render_template('play.html', publisher='', year='', month='', day_key='', boot=None)
 
 
 # ---------------------------------------------------------------------------
 # Crossword play page
 # ---------------------------------------------------------------------------
-@app.route('/play/<publisher>/<year>/<month>/<path:day_key>')
-def play_puzzle(publisher, year, month, day_key):
-    user_id = session.get('user_id')
-    if not user_id:
-        return redirect('/login')
-
-    # The puzzle and the user's saved progress are embedded in the page so it
-    # can start immediately (previously: 2 sequential API calls after load).
+def _build_play_boot(user_id, publisher, year, month, day_key):
     status = 200
     try:
-        puzzle, _ = load_puzzle(publisher, year, month, day_key)
+        puzzle = load_puzzle(publisher, year, month, day_key)
         error = None if puzzle is not None else f"No puzzle found for {publisher}/{year}/{month}/{day_key}"
     except Exception:
         app.logger.exception("Failed to load puzzle %s/%s/%s/%s", publisher, year, month, day_key)
         puzzle, error = None, "Could not load that puzzle"
 
     if puzzle is None:
-        boot = {'error': error}
-        status = 404
-    else:
-        boot = {'puzzle': puzzle,
-                'saved': get_saved_progress(user_id, publisher, year, month, day_key)}
+        return {'error': error}, 404
+    return {
+        'puzzle': puzzle,
+        'saved': get_saved_progress(user_id, publisher, year, month, day_key),
+    }, status
 
+
+@app.route('/play/<publisher>/<year>/<month>/<path:day_key>')
+def play_puzzle(publisher, year, month, day_key):
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect('/login')
+
+    boot, status = _build_play_boot(user_id, publisher, year, month, day_key)
     return render_template('play.html', publisher=publisher, year=year, month=month,
                            day_key=day_key, boot=boot), status
+
+
+@app.route('/api/game/play/<publisher>/<year>/<month>/<path:day_key>')
+def api_game_play(publisher, year, month, day_key):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    boot, status = _build_play_boot(user_id, publisher, year, month, day_key)
+    return jsonify(boot), status
 
 
 # ---------------------------------------------------------------------------
 # Wordle Routes
 # ---------------------------------------------------------------------------
+def _build_wordle_boot(user_id, target_date: date):
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
+    word = get_wordle_word_for_date(target_date)
+    if word is None:
+        return {'year': year, 'month': month_p, 'day': day_p, 'unavailable': True}
+    saved = get_saved_progress(user_id, WORDLE_PUBLISHER, year, month_p, day_p)
+    return {
+        'year': year,
+        'month': month_p,
+        'day': day_p,
+        'target_word': word,
+        'max_guesses': WORDLE_MAX_GUESSES,
+        'saved': saved,
+    }
+
+
 @app.route('/wordle')
 def wordle_today():
     if 'user_id' not in session:
@@ -1751,18 +1635,20 @@ def play_wordle(year, month, day):
     except ValueError:
         return "Invalid date", 400
 
-    # Canonical, zero-padded keys: "/wordle/2026/9/5" and "/wordle/2026/09/05"
-    # are the same day and must share one saved-progress row.
-    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
-    word = get_wordle_word_for_date(target_date)
-    if word is None:
-        return render_template('wordle.html', target_word='', word_unavailable=True,
-                               year=year, month=month_p, day=day_p)
+    boot = _build_wordle_boot(user_id, target_date)
+    return render_template('wordle.html', boot=boot)
 
-    saved = get_saved_progress(user_id, WORDLE_PUBLISHER, year, month_p, day_p)
-    return render_template('wordle.html', target_word=word, word_unavailable=False,
-                           year=year, month=month_p, day=day_p,
-                           max_guesses=WORDLE_MAX_GUESSES, saved=saved)
+
+@app.route('/api/game/wordle/<year>/<month>/<day>')
+def api_game_wordle(year, month, day):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        target_date = date(int(year), int(month), int(day))
+    except ValueError:
+        return jsonify({'error': 'Invalid date'}), 400
+    return jsonify(_build_wordle_boot(user_id, target_date))
 
 
 @app.route('/api/wordle-valid-words')
@@ -1781,25 +1667,12 @@ def wordle_valid_words():
 # ---------------------------------------------------------------------------
 # Spelling Bee & Connections Routes
 # ---------------------------------------------------------------------------
-@lru_cache(maxsize=512)
-def _read_dated_json_file(path, mtime_ns):
-    # mtime is part of the cache key, so a re-scraped puzzle is picked up
-    # immediately while stats pages stop re-reading hundreds of files.
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    return data if isinstance(data, dict) else None
-
-
 def _load_dated_puzzle(base_dir, target_date: date):
     path = os.path.join(
         base_dir, str(target_date.year),
         f"{target_date.month:02d}", f"{target_date.day:02d}.json"
     )
-    try:
-        mtime_ns = os.stat(path).st_mtime_ns
-        return _read_dated_json_file(path, mtime_ns)
-    except (OSError, ValueError):
-        return None      # missing, unreadable, or a corrupt/partial JSON file
+    return _load_json_path(path)
 
 
 def get_spelling_bee_puzzle(target_date: date):
@@ -1827,6 +1700,24 @@ def get_connections_puzzle(target_date: date):
     return json.loads(json.dumps(data))
 
 
+def _build_spelling_bee_boot(user_id, target_date: date):
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
+    puzzle = get_spelling_bee_puzzle(target_date)
+    if puzzle is None:
+        return {'year': year, 'month': month_p, 'day': day_p, 'unavailable': True}
+    saved = get_saved_progress(user_id, SPELLING_BEE_PUBLISHER, year, month_p, day_p)
+    return {'year': year, 'month': month_p, 'day': day_p, 'puzzle': puzzle, 'saved': saved}
+
+
+def _build_connections_boot(user_id, target_date: date):
+    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
+    puzzle = get_connections_puzzle(target_date)
+    if puzzle is None:
+        return {'year': year, 'month': month_p, 'day': day_p, 'unavailable': True}
+    saved = get_saved_progress(user_id, CONNECTIONS_PUBLISHER, year, month_p, day_p)
+    return {'year': year, 'month': month_p, 'day': day_p, 'puzzle': puzzle, 'saved': saved}
+
+
 @app.route('/spelling-bee')
 def spelling_bee_today():
     if 'user_id' not in session:
@@ -1845,15 +1736,19 @@ def play_spelling_bee(year, month, day):
     except ValueError:
         return "Invalid date", 400
 
-    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
-    puzzle = get_spelling_bee_puzzle(target_date)
-    if puzzle is None:
-        return render_template('spelling-bee.html', puzzle_unavailable=True,
-                               year=year, month=month_p, day=day_p)
+    return render_template('spelling-bee.html', boot=_build_spelling_bee_boot(user_id, target_date))
 
-    saved = get_saved_progress(user_id, SPELLING_BEE_PUBLISHER, year, month_p, day_p)
-    return render_template('spelling-bee.html', puzzle_unavailable=False, puzzle=puzzle,
-                           year=year, month=month_p, day=day_p, saved=saved)
+
+@app.route('/api/game/spelling-bee/<year>/<month>/<day>')
+def api_game_spelling_bee(year, month, day):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        target_date = date(int(year), int(month), int(day))
+    except ValueError:
+        return jsonify({'error': 'Invalid date'}), 400
+    return jsonify(_build_spelling_bee_boot(user_id, target_date))
 
 
 @app.route('/connections')
@@ -1874,15 +1769,19 @@ def play_connections(year, month, day):
     except ValueError:
         return "Invalid date", 400
 
-    year, month_p, day_p = f"{target_date.year:04d}", f"{target_date.month:02d}", f"{target_date.day:02d}"
-    puzzle = get_connections_puzzle(target_date)
-    if puzzle is None:
-        return render_template('connections.html', puzzle_unavailable=True,
-                               year=year, month=month_p, day=day_p)
+    return render_template('connections.html', boot=_build_connections_boot(user_id, target_date))
 
-    saved = get_saved_progress(user_id, CONNECTIONS_PUBLISHER, year, month_p, day_p)
-    return render_template('connections.html', puzzle_unavailable=False, puzzle=puzzle,
-                           year=year, month=month_p, day=day_p, saved=saved)
+
+@app.route('/api/game/connections/<year>/<month>/<day>')
+def api_game_connections(year, month, day):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        target_date = date(int(year), int(month), int(day))
+    except ValueError:
+        return jsonify({'error': 'Invalid date'}), 400
+    return jsonify(_build_connections_boot(user_id, target_date))
 
 
 # ---------------------------------------------------------------------------
@@ -1890,12 +1789,33 @@ def play_connections(year, month, day):
 # ---------------------------------------------------------------------------
 @app.route('/api/puzzles-list')
 def puzzles_list():
-    # These two used to be open to the whole internet (no login), which let
-    # anyone download the entire puzzle archive. Like every other route, they
-    # now need a logged-in session.
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    resp = jsonify(get_master_index())
+    index = {}
+    if os.path.isdir(CROSSWORDS_DIR):
+        for pub_entry in os.scandir(CROSSWORDS_DIR):
+            if not pub_entry.is_dir():
+                continue
+            pub_dict = {}
+            for year_entry in os.scandir(pub_entry.path):
+                if not (year_entry.is_dir() and year_entry.name.isdigit()):
+                    continue
+                year_dict = {}
+                for month_entry in os.scandir(year_entry.path):
+                    if not (month_entry.is_dir() and month_entry.name.isdigit()):
+                        continue
+                    days = {
+                        f.name[:-len('.json')]: True
+                        for f in os.scandir(month_entry.path)
+                        if f.is_file() and f.name.endswith('.json')
+                    }
+                    if days:
+                        year_dict[month_entry.name] = days
+                if year_dict:
+                    pub_dict[year_entry.name] = year_dict
+            if pub_dict:
+                index[pub_entry.name] = pub_dict
+    resp = jsonify(index)
     resp.headers['Cache-Control'] = 'private, max-age=3600'
     return resp
 
@@ -1905,7 +1825,7 @@ def get_puzzle_json(publisher, year, month, day_key):
     if 'user_id' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        puzzle, immutable = load_puzzle(publisher, year, month, day_key)
+        puzzle = load_puzzle(publisher, year, month, day_key)
     except Exception:
         app.logger.exception("Failed to load puzzle %s/%s/%s/%s", publisher, year, month, day_key)
         return jsonify({"error": "Could not load that puzzle"}), 500
@@ -1914,20 +1834,16 @@ def get_puzzle_json(publisher, year, month, day_key):
         return jsonify({"error": "No puzzle found for that date"}), 404
 
     resp = jsonify(puzzle)
-    if immutable:
-        resp.headers['Cache-Control'] = 'private, max-age=86400'
+    resp.headers['Cache-Control'] = 'private, max-age=86400'
     return resp
 
 
 def _warm_caches():
-    # Load the big master index / word list at startup instead of on the first request.
-    for fn in (get_master_index, get_valid_wordle_words_text):
-        try:
-            fn()
-        except Exception as e:
-            # Not fatal (they load lazily on first use), but say so in the log
-            # instead of failing silently.
-            print(f"[startup] could not preload {fn.__name__}: {e}", flush=True)
+    # Load the word list at startup instead of on the first request.
+    try:
+        get_valid_wordle_words_text()
+    except Exception as e:
+        print(f"[startup] could not preload get_valid_wordle_words_text: {e}", flush=True)
 
 
 _warm_caches()

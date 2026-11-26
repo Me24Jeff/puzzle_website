@@ -5,14 +5,17 @@
  * share between users and rarely change:
  *   - /static/*  (icons, progress SVGs, sounds, manifest)
  *   - the Tailwind CDN script (big, third-party, same on every page)
+ *   - /shell/*   (empty game page HTML shells - no per-user or puzzle data)
  *
- * It deliberately does NOT touch HTML pages or /api/* - those contain
- * per-user data and always go to the network.
+ * When navigating to a game page (/wordle/..., /spelling-bee/...,
+ * /connections/..., /play/...), the cached shell is served immediately and the
+ * page fetches only the small JSON payload for that puzzle + saved progress.
  *
- * To force everyone to re-download static assets after you change them,
- * bump VERSION below (then rebuild/restart the web container).
+ * VERSION is stamped automatically from a hash of sw.js + game templates when
+ * app.py serves /sw.js, so any template or worker change invalidates old caches
+ * on the next reload.
  */
-const VERSION = 'v1';
+const VERSION = '__SW_VERSION__';
 const CACHE = `crossword-static-${VERSION}`;
 
 const CDN_HOSTS = ['cdn.tailwindcss.com'];
@@ -24,10 +27,28 @@ const PRECACHE = [
   '/static/icon/512.png',
   '/static/site.webmanifest',
   'https://cdn.tailwindcss.com',
+  '/shell/wordle',
+  '/shell/spelling-bee',
+  '/shell/connections',
+  '/shell/play',
+];
+
+const SHELL_ROUTES = [
+  { pattern: /^\/wordle\/\d{4}\/\d{1,2}\/\d{1,2}\/?$/, shell: '/shell/wordle' },
+  { pattern: /^\/spelling-bee\/\d{4}\/\d{1,2}\/\d{1,2}\/?$/, shell: '/shell/spelling-bee' },
+  { pattern: /^\/connections\/\d{4}\/\d{1,2}\/\d{1,2}\/?$/, shell: '/shell/connections' },
+  { pattern: /^\/play\/[^/]+\/\d{4}\/\d{1,2}\/[^/]+\/?$/, shell: '/shell/play' },
 ];
 
 function isSameOrigin(url) {
   return url.origin === self.location.origin;
+}
+
+function matchShell(pathname) {
+  for (const r of SHELL_ROUTES) {
+    if (r.pattern.test(pathname)) return r.shell;
+  }
+  return null;
 }
 
 self.addEventListener('install', (event) => {
@@ -73,6 +94,18 @@ async function cacheFirst(request, url) {
   return res;
 }
 
+async function handleGameNavigation(request, shellPath) {
+  const cache = await caches.open(CACHE);
+  const shellUrl = new URL(shellPath, self.location.origin).href;
+  const hit = await cache.match(shellUrl);
+  if (hit) return hit;
+
+  // Shell not cached yet: let the normal SSR request serve the full page, and
+  // warm the shell in the background for next time.
+  cache.add(new Request(shellUrl, { cache: 'reload' })).catch(() => {});
+  return fetch(request);
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -81,9 +114,18 @@ self.addEventListener('fetch', (event) => {
   if (request.headers.has('range')) return;
 
   const url = new URL(request.url);
+
+  if (request.mode === 'navigate' && isSameOrigin(url)) {
+    const shell = matchShell(url.pathname);
+    if (shell) {
+      event.respondWith(handleGameNavigation(request, shell));
+      return;
+    }
+  }
+
   const isStatic = isSameOrigin(url) && url.pathname.startsWith('/static/');
   const isCdn = CDN_HOSTS.includes(url.hostname);
-  if (!isStatic && !isCdn) return;          // pages + API: straight to network
+  if (!isStatic && !isCdn) return;          // other pages + API: straight to network
 
   event.respondWith(cacheFirst(request, url));
 });

@@ -19,7 +19,7 @@
     <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
     <meta name="color-scheme" content="light dark">
-    <title>Wordle &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <title>Wordle</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -249,16 +249,14 @@
             </div>
         </header>
 
-        {% if word_unavailable %}
-        <div class="flex-1 flex items-center justify-center p-6">
+        <div id="unavailable-view" class="hidden flex-1 flex items-center justify-center p-6">
             <div class="text-center max-w-sm">
                 <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
                 <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or before the Wordle archive started.</p>
             </div>
         </div>
-        {% else %}
         <div id="board-container">
-            <div id="board" style="--max-guesses: {{ max_guesses }};"></div>
+            <div id="board" style="--max-guesses: 6;"></div>
         </div>
 
         <div id="keyboard">
@@ -266,11 +264,10 @@
             <div class="k-row" id="k2"></div>
             <div class="k-row" id="k3"></div>
         </div>
-        {% endif %}
     </div>
 
-    <script id="wordle-meta" type="application/json">
-        {{ {"year": year, "month": month, "day": day} | tojson }}
+    <script id="wordle-boot" type="application/json">
+        {{ (boot or none) | tojson }}
     </script>
 
     <script>
@@ -287,14 +284,29 @@
         }
     </script>
 
-    {% if not word_unavailable %}
     <script>
-        const meta = JSON.parse(document.getElementById('wordle-meta').textContent);
-        // This user's saved guesses for the day, embedded by the server (no fetch needed).
-        const SAVED = {{ (saved or {}) | tojson }};
-        const TARGET = {{ target_word | tojson }};
-        const WORD_LENGTH = TARGET.length;
-        const MAX_ATTEMPTS = {{ max_guesses }};
+        function parseDateFromUrl() {
+            const m = window.location.pathname.match(/^\/wordle\/(\d{4})\/(\d{1,2})\/(\d{1,2})\/?$/);
+            if (!m) return { year: '', month: '', day: '' };
+            return {
+                year: m[1].padStart(4, '0'),
+                month: m[2].padStart(2, '0'),
+                day: m[3].padStart(2, '0')
+            };
+        }
+
+        const BOOT = (() => {
+            try { return JSON.parse(document.getElementById('wordle-boot').textContent); } catch (e) { return null; }
+        })();
+        const meta = (BOOT && BOOT.year) ? { year: BOOT.year, month: BOOT.month, day: BOOT.day } : parseDateFromUrl();
+        if (meta.year) {
+            document.title = `Wordle · ${meta.year}-${meta.month}-${meta.day}`;
+        }
+
+        let TARGET = "";
+        let WORD_LENGTH = 5;
+        let MAX_ATTEMPTS = 6;
+        let gameReady = false;
 
         document.getElementById('board').style.setProperty('--word-length', WORD_LENGTH);
 
@@ -327,25 +339,31 @@
         loadValidWords();
 
         // --- Header date label ---
-        (function renderDateLabel() {
+        if (meta.year) {
             const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
             const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
             document.getElementById('puzzle-date').textContent = label;
-        })();
+        }
 
         // --- Build grid ---
         const board = document.getElementById("board");
-        for (let i = 0; i < MAX_ATTEMPTS; i++) {
-            const row = document.createElement("div");
-            row.className = "row";
-            for (let j = 0; j < WORD_LENGTH; j++) {
-                const tile = document.createElement("div");
-                tile.className = "tile";
-                tile.id = `tile-${i}-${j}`;
-                row.appendChild(tile);
+        function buildGrid() {
+            board.innerHTML = "";
+            board.style.setProperty('--max-guesses', MAX_ATTEMPTS);
+            board.style.setProperty('--word-length', WORD_LENGTH);
+            for (let i = 0; i < MAX_ATTEMPTS; i++) {
+                const row = document.createElement("div");
+                row.className = "row";
+                for (let j = 0; j < WORD_LENGTH; j++) {
+                    const tile = document.createElement("div");
+                    tile.className = "tile";
+                    tile.id = `tile-${i}-${j}`;
+                    row.appendChild(tile);
+                }
+                board.appendChild(row);
             }
-            board.appendChild(row);
         }
+        buildGrid();
 
         // --- Build keyboard ---
         const layout = [
@@ -370,7 +388,7 @@
         });
 
         document.addEventListener("keydown", (e) => {
-            if (gameOver) return;
+            if (!gameReady || gameOver) return;
             // Leave browser/OS shortcuts (Ctrl+R, Cmd+C, Alt+Left ...) alone.
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (e.key === "Enter") { e.preventDefault(); handleKey("ENTER"); }
@@ -387,8 +405,8 @@
         const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
         let hardMode = false;
-        (function initHardMode() {
-            const g = SAVED && SAVED.userGrid;
+        function initHardMode(saved) {
+            const g = saved && saved.userGrid;
             const started = !!(g && Array.isArray(g.guesses) && g.guesses.length > 0);
             if (started) {
                 hardMode = g.hard === true;            // started puzzles keep their own setting
@@ -397,10 +415,10 @@
                 hardMode = (own !== null ? own : lsGet(HARD_PREF_KEY)) === '1';
             }
             document.getElementById('hard-mode-btn').classList.toggle('active', hardMode);
-        })();
+        }
 
         function toggleHardMode() {
-            if (gameOver) return;
+            if (!gameReady || gameOver) return;
 
             // Turning ON is only allowed before the first guess.
             if (!hardMode && guesses.length > 0) {
@@ -523,7 +541,7 @@
         }
 
         function handleKey(key) {
-            if (gameOver || busy) return;
+            if (!gameReady || gameOver || busy) return;
 
             if (key === "DEL") {
                 if (currentTile > 0) {
@@ -638,8 +656,7 @@
             document.getElementById('result-modal').classList.add('hidden');
         }
 
-        function loadProgress() {
-            const saved = SAVED;
+        function loadProgress(saved) {
             if (saved && saved.userGrid && saved.userGrid.guesses) {
                 guesses = saved.userGrid.guesses;
                 results = saved.userGrid.results || [];
@@ -666,8 +683,47 @@
             }
         }
 
-        loadProgress();
+        function applyBoot(data) {
+            if (!data || data.unavailable || !data.target_word) {
+                document.getElementById('board-container').classList.add('hidden');
+                document.getElementById('keyboard').classList.add('hidden');
+                document.getElementById('unavailable-view').classList.remove('hidden');
+                return;
+            }
+            const nextLen = data.target_word.length;
+            const nextAttempts = data.max_guesses || 6;
+            const needRebuild = nextLen !== WORD_LENGTH || nextAttempts !== MAX_ATTEMPTS;
+            TARGET = data.target_word;
+            WORD_LENGTH = nextLen;
+            MAX_ATTEMPTS = nextAttempts;
+            currentGuessLetters = Array(WORD_LENGTH).fill("");
+            if (needRebuild) buildGrid();
+
+            const saved = data.saved || {};
+            initHardMode(saved);
+            gameReady = true;
+            loadProgress(saved);
+        }
+
+        (async function init() {
+            if (BOOT) {
+                applyBoot(BOOT);
+                return;
+            }
+            if (!meta.year) {
+                applyBoot({ unavailable: true });
+                return;
+            }
+            try {
+                const res = await fetch(`/api/game/wordle/${meta.year}/${meta.month}/${meta.day}`, { cache: 'no-store' });
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                if (!res.ok) { showToast('Could not load puzzle.'); return; }
+                applyBoot(await res.json());
+            } catch (e) {
+                console.error('Error loading Wordle:', e);
+                showToast('Could not load puzzle.');
+            }
+        })();
     </script>
-    {% endif %}
 </body>
 </html>

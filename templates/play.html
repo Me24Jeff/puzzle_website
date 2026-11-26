@@ -19,7 +19,7 @@
     <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
     <meta name="color-scheme" content="light dark">
-    <title>{{ publisher }} &middot; {{ year }}-{{ month }}-{{ day_key }}</title>
+    <title>{{ publisher ~ ' · ' ~ year ~ '-' ~ month ~ '-' ~ day_key if publisher else 'Crossword' }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = { darkMode: 'media' }
@@ -318,7 +318,7 @@
         {{ {"publisher": publisher, "year": year, "month": month, "day_key": day_key} | tojson }}
     </script>
     <script id="boot-data" type="application/json">
-        {{ boot | tojson }}
+        {{ (boot or none) | tojson }}
     </script>
 
     <script>
@@ -338,7 +338,19 @@
         window.location.href = dest;
     }
 
-    const meta = JSON.parse(document.getElementById('puzzle-meta').textContent);
+    function parsePlayMetaFromUrl() {
+        const m = window.location.pathname.match(/^\/play\/([^/]+)\/(\d{4})\/(\d{1,2})\/([^/]+)\/?$/);
+        if (!m) return { publisher: '', year: '', month: '', day_key: '' };
+        return {
+            publisher: decodeURIComponent(m[1]),
+            year: m[2].padStart(4, '0'),
+            month: m[3].padStart(2, '0'),
+            day_key: decodeURIComponent(m[4]),
+        };
+    }
+
+    const rawMeta = JSON.parse(document.getElementById('puzzle-meta').textContent);
+    const meta = (rawMeta && rawMeta.publisher) ? rawMeta : parsePlayMetaFromUrl();
 
     let puzzle = null;
     let lists = { across: [], down: [] };     // clues per direction, in number order
@@ -927,9 +939,7 @@
     // =====================================================================
     //  Building the DOM
     // =====================================================================
-    function loadPuzzle() {
-        let boot = null;
-        try { boot = JSON.parse(document.getElementById('boot-data').textContent); } catch (e) {}
+    function initFromBoot(boot) {
         if (!boot || boot.error || !boot.puzzle) {
             document.getElementById('status').textContent =
                 `Couldn't load this puzzle: ${(boot && boot.error) || 'unknown error'}`;
@@ -991,6 +1001,29 @@
         document.getElementById('grid').classList.remove('hidden');
         updateGridDimensions(1);
         render();
+    }
+
+    async function loadPuzzle() {
+        let boot = null;
+        try { boot = JSON.parse(document.getElementById('boot-data').textContent); } catch (e) {}
+        if (boot) {
+            initFromBoot(boot);
+            return;
+        }
+        if (!meta.publisher) {
+            initFromBoot({ error: 'Invalid puzzle URL' });
+            return;
+        }
+        try {
+            const url = `/api/game/play/${encodeURIComponent(meta.publisher)}/${meta.year}/${meta.month}/${encodeURIComponent(meta.day_key)}`;
+            const res = await fetch(url, { cache: 'no-store' });
+            if (res.status === 401) { window.location.href = '/login'; return; }
+            const data = await res.json().catch(() => null);
+            initFromBoot(data || { error: `HTTP ${res.status}` });
+        } catch (e) {
+            console.error('Error loading puzzle:', e);
+            initFromBoot({ error: 'Could not reach server' });
+        }
     }
 
     function buildGridDom() {

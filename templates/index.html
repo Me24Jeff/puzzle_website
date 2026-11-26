@@ -26,6 +26,7 @@
         }
         const todayTitles = {{ today_titles | tojson }};
         const todayAvailable = {{ today_available | tojson }};
+        const latestDates = {{ latest_dates | tojson }};
         // Name/avatar + the last ~10 days of progress, rendered server-side so the
         // dashboard doesn't need /api/me + /api/progress round trips on load.
         const BOOT = {{ boot | tojson }};
@@ -376,7 +377,15 @@
             return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
 
+        let currentTab = 'puzzles';
+        const tabScrollPositions = { puzzles: 0, friends: 0, account: 0 };
+
         function switchTab(tabName) {
+            if (tabName !== currentTab) {
+                tabScrollPositions[currentTab] = window.scrollY;
+                currentTab = tabName;
+            }
+
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.getElementById(`tab-${tabName}`).classList.remove('hidden');
 
@@ -389,9 +398,23 @@
                 }
             });
 
-            if (tabName === 'friends') loadLeaderboard();
+            const targetY = tabScrollPositions[tabName] || 0;
+            window.scrollTo(0, targetY);
+            const clampedY = window.scrollY;
+
+            if (tabName === 'friends') {
+                loadLeaderboard().then(() => {
+                    if (currentTab === 'friends' && clampedY !== targetY && window.scrollY === clampedY) {
+                        window.scrollTo(0, targetY);
+                    }
+                });
+            }
             if (tabName === 'account') {
-                loadUserStats();
+                loadUserStats().then(() => {
+                    if (currentTab === 'account' && clampedY !== targetY && window.scrollY === clampedY) {
+                        window.scrollTo(0, targetY);
+                    }
+                });
                 loadAdminUsers();
             }
         }
@@ -481,12 +504,16 @@
 
             const dateVal = dateInput.value;
             const container = document.getElementById('leaderboard-list');
-            container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">Loading leaderboard...</div>';
+            const apiUrl = `/api/friends/leaderboard?type=${encodeURIComponent(currentFriendsSubTab)}&date=${encodeURIComponent(dateVal)}`;
+            const cachedHit = _jsonCache.get(apiUrl);
+            if (!cachedHit || Date.now() - cachedHit.t >= 20000) {
+                container.innerHTML = '<div class="text-center text-slate-400 dark:text-neutral-500 py-6 text-sm">Loading leaderboard...</div>';
+            }
 
             // If the tab/date changes while this request is in flight, drop the
             // stale answer instead of letting it overwrite the newer leaderboard.
             const myRequest = ++leaderboardRequestId;
-            let users = await fetchJsonCached(`/api/friends/leaderboard?type=${encodeURIComponent(currentFriendsSubTab)}&date=${encodeURIComponent(dateVal)}`, 20000);
+            let users = await fetchJsonCached(apiUrl, 20000);
             if (myRequest !== leaderboardRequestId) return;
             if (users === null) {
                 container.innerHTML = '<div class="text-center text-red-500 dark:text-red-400 py-4 text-sm">Failed to load leaderboard</div>';
@@ -658,12 +685,12 @@
         }
 
         const STAT_SECTIONS = [
-            { id: 'connections', name: 'Connections', color: '#b2a7f9', icon: '/static/connections/progress-0.svg' },
-            { id: 'wordle',      name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
-            { id: 'bee',         name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
-            { id: 'mini',        name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
-            { id: 'midi',        name: 'Midi',         color: '#7ca8f1', icon: '/static/midi/progress-0.svg' },
             { id: 'normal',      name: 'Crossword',    color: '#6593e6', icon: '/static/normal/progress-0.svg' },
+            { id: 'midi',        name: 'Midi',         color: '#7ca8f1', icon: '/static/midi/progress-0.svg' },
+            { id: 'mini',        name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
+            { id: 'bee',         name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
+            { id: 'wordle',      name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
+            { id: 'connections', name: 'Connections',  color: '#b2a7f9', icon: '/static/connections/progress-0.svg' },
         ];
 
         function buildStatsAccordion() {
@@ -929,7 +956,7 @@
         }
 
         async function loadUserProgress() {
-            const res = await fetch('/api/progress?days=10');
+            const res = await fetch('/api/progress?days=14');
             if (res.ok) {
                 userProgressMap = await res.json();
                 renderRows();
@@ -1122,10 +1149,16 @@
 
             rowConfigs.forEach(config => {
                 let rowHtml = '<div class="table-responsive"><div class="row">';
+                const anchorIso = latestDates && latestDates[config.typeFolder];
+                let anchorDate = today;
+                if (anchorIso) {
+                    const [ay, am, ad] = anchorIso.split('-').map(Number);
+                    anchorDate = new Date(ay, am - 1, ad);
+                }
 
                 for (let i = 0; i < 7; i++) {
-                    const currentDate = new Date(today);
-                    currentDate.setDate(today.getDate() - i);
+                    const currentDate = new Date(anchorDate);
+                    currentDate.setDate(anchorDate.getDate() - i);
 
                     const isToday = (i === 0);
                     const year = currentDate.getFullYear();

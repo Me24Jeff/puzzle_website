@@ -19,7 +19,7 @@
     <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
     <meta name="color-scheme" content="light dark">
-    <title>Connections &middot; {{ year }}-{{ month }}-{{ day }}</title>
+    <title>Connections</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = { darkMode: 'media' }
@@ -282,15 +282,13 @@
             </div>
         </header>
 
-        {% if puzzle_unavailable %}
-        <div class="flex-1 flex items-center justify-center p-6">
+        <div id="unavailable-view" class="hidden flex-1 flex items-center justify-center p-6">
             <div class="text-center max-w-sm">
                 <p class="text-lg font-bold text-slate-800 dark:text-white mb-2">No puzzle for this day</p>
                 <p class="text-sm text-slate-500 dark:text-neutral-400">This date is either in the future or before the Connections archive started.</p>
             </div>
         </div>
-        {% else %}
-        <main class="flex-1 min-h-0 flex flex-col items-center px-3 pt-5 pb-6 overflow-y-auto">
+        <main id="game-main" class="flex-1 min-h-0 flex flex-col items-center px-3 pt-5 pb-6 overflow-y-auto">
             <div id="board-wrap" class="w-full max-w-[540px] flex flex-col gap-3">
                 <p class="text-center text-sm font-normal text-slate-700 dark:text-neutral-300 select-none">
                     Create four groups of four!
@@ -315,17 +313,16 @@
 
                 <!-- Action controls -->
                 <div id="controls-row" class="flex items-center justify-center gap-2.5 pb-2">
-                    <button id="shuffle-btn" class="ctrl-btn" onclick="shuffleTiles()">Shuffle</button>
+                    <button id="shuffle-btn" class="ctrl-btn" onclick="shuffleTiles()" disabled>Shuffle</button>
                     <button id="deselect-btn" class="ctrl-btn" onclick="deselectAll()" disabled>Deselect All</button>
                     <button id="submit-btn" class="ctrl-btn submit-btn" onclick="submitGuess()" disabled>Submit</button>
                 </div>
             </div>
         </main>
-        {% endif %}
     </div>
 
-    <script id="conn-meta" type="application/json">
-        {{ {"year": year, "month": month, "day": day} | tojson }}
+    <script id="conn-boot" type="application/json">
+        {{ (boot or none) | tojson }}
     </script>
 
     <script>
@@ -342,72 +339,47 @@
         }
     </script>
 
-    {% if not puzzle_unavailable %}
-    <script id="conn-puzzle" type="application/json">
-        {{ puzzle | tojson }}
-    </script>
     <script>
-        const meta = JSON.parse(document.getElementById('conn-meta').textContent);
-        const PUZZLE = JSON.parse(document.getElementById('conn-puzzle').textContent);
-        const SAVED = {{ (saved or {}) | tojson }};
+        function parseDateFromUrl() {
+            const m = window.location.pathname.match(/^\/connections\/(\d{4})\/(\d{1,2})\/(\d{1,2})\/?$/);
+            if (!m) return { year: '', month: '', day: '' };
+            return {
+                year: m[1].padStart(4, '0'),
+                month: m[2].padStart(2, '0'),
+                day: m[3].padStart(2, '0')
+            };
+        }
+
+        const BOOT = (() => {
+            try { return JSON.parse(document.getElementById('conn-boot').textContent); } catch (e) { return null; }
+        })();
+        const meta = (BOOT && BOOT.year) ? { year: BOOT.year, month: BOOT.month, day: BOOT.day } : parseDateFromUrl();
+        if (meta.year) {
+            document.title = `Connections · ${meta.year}-${meta.month}-${meta.day}`;
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            document.getElementById('puzzle-date').textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        }
 
         const MAX_MISTAKES = 4;
         const LEVEL_EMOJIS = ['🟨', '🟩', '🟦', '🟪'];
 
-        // Build card lookup (id = 0..15 assigned by position if valid, else index)
-        // Keeping a stable card id per card (its original position 0..15) makes
-        // saved state compact and preserves NYT's starting layout cleanly.
-        const CARDS = [];
-        const CARD_BY_ID = {};
-        const CATEGORIES = PUZZLE.categories.map((cat, idx) => {
-            const level = (typeof cat.level === 'number') ? cat.level : idx;
-            const cards = cat.cards.map((c, j) => {
-                const id = (typeof c.position === 'number') ? c.position : (idx * 4 + j);
-                const cardObj = {
-                    id,
-                    level,
-                    content: c.content || null,
-                    imageUrl: c.image_url || null,
-                    altText: c.image_alt_text || '',
-                    position: id,
-                };
-                CARDS.push(cardObj);
-                CARD_BY_ID[id] = cardObj;
-                return cardObj;
-            });
-            return { level, title: cat.title, cards };
-        });
-
-        const CATEGORY_BY_LEVEL = {};
-        CATEGORIES.forEach(cat => { CATEGORY_BY_LEVEL[cat.level] = cat; });
-
-        // Initial starting order: preserve NYT's curated 4x4 grid (`position: 0..15`)
-        const INITIAL_ORDER = [...CARDS].sort((a, b) => a.position - b.position).map(c => c.id);
+        let CARDS = [];
+        let CARD_BY_ID = {};
+        let CATEGORIES = [];
+        let CATEGORY_BY_LEVEL = {};
+        let INITIAL_ORDER = [];
+        let PUZZLE_NUMBER = null;
 
         let solvedLevels = [];     // levels solved in chronological order (e.g. [0, 2])
         let revealedLevels = [];   // extra levels auto-revealed on loss
         let mistakes = 0;
         let guessHistory = [];     // [{ cards: [id1,id2,id3,id4], levels: [l1,l2,l3,l4] }, ...]
-        let unsolvedOrder = [...INITIAL_ORDER];
+        let unsolvedOrder = [];
         let selectedIds = new Set();
         let gameOver = false;
         let isWon = false;
         let busy = false;
-
-        const PUZZLE_NUMBER = (() => {
-            if (typeof PUZZLE.puzzle_number === 'number') return PUZZLE.puzzle_number;
-            const d = Date.UTC(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
-            const epoch = Date.UTC(2023, 5, 12); // 2023-06-12 = #1
-            const num = Math.round((d - epoch) / 86400000) + 1;
-            return num >= 1 ? num : PUZZLE.id;
-        })();
-
-        // --- Header date label ---
-        (function renderDateLabel() {
-            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
-            const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-            document.getElementById('puzzle-date').textContent = PUZZLE_NUMBER ? `${label} · #${PUZZLE_NUMBER}` : label;
-        })();
+        let gameReady = false;
 
         function escapeHtml(str) {
             return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -577,7 +549,7 @@
         }
 
         function toggleTile(id, btnEl) {
-            if (gameOver || busy) return;
+            if (!gameReady || gameOver || busy) return;
             if (selectedIds.has(id)) {
                 selectedIds.delete(id);
                 btnEl.classList.remove('selected');
@@ -590,14 +562,14 @@
         }
 
         function deselectAll() {
-            if (gameOver || busy || selectedIds.size === 0) return;
+            if (!gameReady || gameOver || busy || selectedIds.size === 0) return;
             selectedIds.clear();
             document.querySelectorAll('.conn-tile.selected').forEach(el => el.classList.remove('selected'));
             updateControlsUI();
         }
 
         function shuffleTiles() {
-            if (gameOver || busy || unsolvedOrder.length <= 1) return;
+            if (!gameReady || gameOver || busy || unsolvedOrder.length <= 1) return;
             for (let i = unsolvedOrder.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [unsolvedOrder[i], unsolvedOrder[j]] = [unsolvedOrder[j], unsolvedOrder[i]];
@@ -643,7 +615,7 @@
         }
 
         async function submitGuess() {
-            if (gameOver || busy || selectedIds.size !== 4) return;
+            if (!gameReady || gameOver || busy || selectedIds.size !== 4) return;
 
             const picked = [...selectedIds];
             if (guessHistory.some(g => Array.isArray(g.cards) && sameCardSet(g.cards, picked))) {
@@ -689,8 +661,9 @@
                 }
 
                 if (displacedIndices.length > 0) {
+                    const gridEl = document.getElementById('tile-grid');
                     const prevTileRects = new Map();
-                    document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
+                    gridEl.querySelectorAll('.conn-tile').forEach(el => {
                         prevTileRects.set(el.dataset.cardId, el.getBoundingClientRect());
                     });
 
@@ -701,10 +674,18 @@
                         [swappedOrder[topIdx], swappedOrder[lowIdx]] = [swappedOrder[lowIdx], swappedOrder[topIdx]];
                     }
                     unsolvedOrder = swappedOrder;
-                    renderBoard();
 
-                    const swapAnims = [];
-                    document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
+                    // Reorder existing tile nodes in place so we don't destroy/recreate DOM or
+                    // trigger text-fitting reflows right before animating.
+                    const elById = new Map();
+                    gridEl.querySelectorAll('.conn-tile').forEach(el => elById.set(el.dataset.cardId, el));
+                    unsolvedOrder.forEach(id => {
+                        const el = elById.get(String(id));
+                        if (el) gridEl.appendChild(el);
+                    });
+
+                    const movers = [];
+                    gridEl.querySelectorAll('.conn-tile').forEach(el => {
                         const prev = prevTileRects.get(el.dataset.cardId);
                         if (!prev) return;
                         const next = el.getBoundingClientRect();
@@ -713,18 +694,33 @@
                         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
                             const id = Number(el.dataset.cardId);
                             el.style.zIndex = pickedSet.has(id) ? '20' : '10';
-                            swapAnims.push(
-                                runAnim(el, [
-                                    { transform: `translate(${dx}px, ${dy}px)` },
-                                    { transform: 'translate(0, 0)' }
-                                ], {
-                                    duration: 460,
-                                    easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
-                                }).then(() => { el.style.zIndex = ''; })
-                            );
+                            el.style.willChange = 'transform';
+                            el.style.transform = `translate(${dx}px, ${dy}px)`;
+                            movers.push({ el, dx, dy });
                         }
                     });
-                    await Promise.all(swapAnims);
+
+                    if (movers.length > 0) {
+                        // Let the browser paint one frame at the inverted positions and promote
+                        // compositor layers before starting the clock so frame 1 doesn't stall.
+                        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+                        const swapAnims = movers.map(({ el, dx, dy }) => {
+                            const animPromise = runAnim(el, [
+                                { transform: `translate(${dx}px, ${dy}px)` },
+                                { transform: 'translate(0, 0)' }
+                            ], {
+                                duration: 420,
+                                easing: 'cubic-bezier(0.4, 0, 0.2, 1)'
+                            });
+                            el.style.transform = '';
+                            return animPromise.then(() => {
+                                el.style.zIndex = '';
+                                el.style.willChange = '';
+                            });
+                        });
+                        await Promise.all(swapAnims);
+                    }
                 }
 
                 // Phase 3 & 4: Replace top row with category banner (color pop + label/words fade-in)
@@ -848,7 +844,7 @@
         }
 
         document.addEventListener('keydown', (e) => {
-            if (gameOver || busy) return;
+            if (!gameReady || gameOver || busy) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -859,6 +855,7 @@
         });
 
         window.addEventListener('resize', () => {
+            if (!gameReady) return;
             syncBannerSize();
             document.querySelectorAll('#tile-grid .conn-tile:not(.is-image)').forEach(btn => {
                 const label = btn.querySelector('.tile-label');
@@ -868,8 +865,7 @@
             });
         });
 
-        function loadProgress() {
-            const saved = SAVED;
+        function loadProgress(saved) {
             if (saved && saved.userGrid && typeof saved.userGrid === 'object') {
                 const g = saved.userGrid;
                 if (Array.isArray(g.solved)) {
@@ -922,8 +918,74 @@
             renderBoard();
         }
 
-        loadProgress();
+        function applyBoot(data) {
+            if (!data || data.unavailable || !data.puzzle) {
+                document.getElementById('game-main').classList.add('hidden');
+                document.getElementById('unavailable-view').classList.remove('hidden');
+                return;
+            }
+            const puzzle = data.puzzle;
+            CARDS = [];
+            CARD_BY_ID = {};
+            CATEGORIES = puzzle.categories.map((cat, idx) => {
+                const level = (typeof cat.level === 'number') ? cat.level : idx;
+                const cards = cat.cards.map((c, j) => {
+                    const id = (typeof c.position === 'number') ? c.position : (idx * 4 + j);
+                    const cardObj = {
+                        id,
+                        level,
+                        content: c.content || null,
+                        imageUrl: c.image_url || null,
+                        altText: c.image_alt_text || '',
+                        position: id,
+                    };
+                    CARDS.push(cardObj);
+                    CARD_BY_ID[id] = cardObj;
+                    return cardObj;
+                });
+                return { level, title: cat.title, cards };
+            });
+
+            CATEGORY_BY_LEVEL = {};
+            CATEGORIES.forEach(cat => { CATEGORY_BY_LEVEL[cat.level] = cat; });
+            INITIAL_ORDER = [...CARDS].sort((a, b) => a.position - b.position).map(c => c.id);
+            unsolvedOrder = [...INITIAL_ORDER];
+
+            PUZZLE_NUMBER = (() => {
+                if (typeof puzzle.puzzle_number === 'number') return puzzle.puzzle_number;
+                const d = Date.UTC(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+                const epoch = Date.UTC(2023, 5, 12); // 2023-06-12 = #1
+                const num = Math.round((d - epoch) / 86400000) + 1;
+                return num >= 1 ? num : puzzle.id;
+            })();
+
+            const d = new Date(parseInt(meta.year), parseInt(meta.month) - 1, parseInt(meta.day));
+            const label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            document.getElementById('puzzle-date').textContent = PUZZLE_NUMBER ? `${label} · #${PUZZLE_NUMBER}` : label;
+
+            gameReady = true;
+            loadProgress(data.saved || {});
+        }
+
+        (async function init() {
+            if (BOOT) {
+                applyBoot(BOOT);
+                return;
+            }
+            if (!meta.year) {
+                applyBoot({ unavailable: true });
+                return;
+            }
+            try {
+                const res = await fetch(`/api/game/connections/${meta.year}/${meta.month}/${meta.day}`, { cache: 'no-store' });
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                if (!res.ok) { showToast('Could not load puzzle.'); return; }
+                applyBoot(await res.json());
+            } catch (e) {
+                console.error('Error loading Connections:', e);
+                showToast('Could not load puzzle.');
+            }
+        })();
     </script>
-    {% endif %}
 </body>
 </html>
