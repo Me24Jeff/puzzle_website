@@ -56,25 +56,25 @@
             background-color: #efefe6;
             color: #0f172a;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
             width: 100%;
             aspect-ratio: 1 / 1;
-            padding: 6px;
+            padding: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
             text-align: center;
-            font-weight: 800;
+            font-weight: 700;
             text-transform: uppercase;
-            line-height: 1.12;
-            letter-spacing: -0.01em;
+            line-height: 1.1;
+            letter-spacing: -0.025em;
             cursor: pointer;
             user-select: none;
             overflow: hidden;
             overflow-wrap: normal;
             word-break: normal;
             white-space: normal;
-            transition: transform 0.1s ease, background-color 0.15s ease, color 0.15s ease;
+            transition: transform 0.12s ease, background-color 0.15s ease, color 0.15s ease;
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
         }
@@ -119,26 +119,32 @@
         }
 
         .conn-tile.hop {
-            animation: tile-hop 0.28s ease;
+            animation: tile-hop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
         }
         @keyframes tile-hop {
             0% { transform: translateY(0); }
-            50% { transform: translateY(-6px); }
+            45% { transform: translateY(-13px); }
+            78% { transform: translateY(3px); }
             100% { transform: translateY(0); }
         }
 
         .cat-banner {
-            border-radius: 10px;
-            padding: 12px 14px;
+            border-radius: 8px;
+            padding: 6px 12px;
             text-align: center;
             width: 100%;
+            height: var(--tile-size, 76px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             box-sizing: border-box;
         }
         .cat-banner.pop {
-            animation: banner-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: banner-pop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
         }
         @keyframes banner-pop {
-            0% { opacity: 0; transform: scale(0.92); }
+            0% { opacity: 0; transform: scale(0.95); }
             100% { opacity: 1; transform: scale(1); }
         }
 
@@ -160,9 +166,9 @@
         .ctrl-btn {
             border: 1.5px solid #94a3b8;
             border-radius: 9999px;
-            font-weight: 700;
+            font-weight: 600;
             font-size: 0.85rem;
-            padding: 0.62rem 1.2rem;
+            padding: 0.6rem 1.2rem;
             background: transparent;
             color: #0f172a;
             cursor: pointer;
@@ -277,21 +283,21 @@
             </div>
         </div>
         {% else %}
-        <main class="flex-1 min-h-0 flex flex-col items-center px-3 py-3 overflow-y-auto">
-            <div class="w-full max-w-[540px] my-auto flex flex-col gap-3">
-                <p class="text-center text-sm font-semibold text-slate-600 dark:text-neutral-400 select-none">
+        <main class="flex-1 min-h-0 flex flex-col items-center px-3 pt-5 pb-6 overflow-y-auto">
+            <div id="board-wrap" class="w-full max-w-[540px] flex flex-col gap-3">
+                <p class="text-center text-sm font-normal text-slate-700 dark:text-neutral-300 select-none">
                     Create four groups of four!
                 </p>
 
                 <!-- Solved categories + 4x4 grid -->
-                <div class="flex flex-col gap-2">
+                <div id="board-stack" class="flex flex-col gap-2">
                     <div id="solved-banners" class="flex flex-col gap-2"></div>
                     <div id="tile-grid"></div>
                 </div>
 
                 <!-- Mistakes remaining -->
                 <div id="mistakes-row" class="flex items-center justify-center gap-2.5 py-1 select-none">
-                    <span class="text-xs font-semibold text-slate-600 dark:text-neutral-400">Mistakes remaining:</span>
+                    <span class="text-xs font-normal text-slate-600 dark:text-neutral-400">Mistakes Remaining:</span>
                     <div id="mistake-dots" class="flex items-center gap-2">
                         <span class="mistake-dot"></span>
                         <span class="mistake-dot"></span>
@@ -411,18 +417,27 @@
         }
 
         function initialTileFontSize(text) {
-            if (!text) return 15;
+            if (!text) return 14;
             // Emoji-only tiles look great larger
             const noSpaces = text.replace(/\s+/g, '');
             if (/^[\p{Emoji}\uFE0F\u200D]+$/u.test(noSpaces) && [...noSpaces].length <= 4) {
-                return 28;
+                return 26;
             }
             const words = text.trim().split(/\s+/);
             const longestWord = Math.max(...words.map(w => w.length));
-            if (longestWord >= 12) return 11;
-            if (longestWord >= 9 || text.length >= 16) return 12.5;
-            if (longestWord >= 7 || text.length >= 10) return 13.5;
-            return 15;
+            if (longestWord >= 12) return 10.5;
+            if (longestWord >= 9 || text.length >= 16) return 11.5;
+            if (longestWord >= 7 || text.length >= 10) return 12.5;
+            return 14;
+        }
+
+        function syncBannerSize() {
+            const stack = document.getElementById('board-stack');
+            if (!stack) return;
+            const tileSize = (stack.clientWidth - 24) / 4; // 4 cols with 3x8px gaps
+            if (tileSize > 0) {
+                stack.style.setProperty('--tile-size', `${tileSize}px`);
+            }
         }
 
         function fitTileText(btn) {
@@ -453,14 +468,15 @@
                 membersHtml = `<div class="flex flex-wrap items-center justify-center gap-1.5 mt-1">${items}</div>`;
             } else {
                 const names = cat.cards.map(c => c.content || c.altText).join(', ');
-                membersHtml = `<p class="text-xs sm:text-sm font-semibold uppercase tracking-wide mt-0.5">${escapeHtml(names)}</p>`;
+                membersHtml = `<p class="text-xs sm:text-sm font-normal uppercase tracking-tight mt-0.5 leading-tight">${escapeHtml(names)}</p>`;
             }
 
-            div.innerHTML = `<p class="text-sm sm:text-base font-black uppercase tracking-wide">${escapeHtml(cat.title)}</p>${membersHtml}`;
+            div.innerHTML = `<p class="text-sm sm:text-base font-bold uppercase tracking-tight leading-tight">${escapeHtml(cat.title)}</p>${membersHtml}`;
             return div;
         }
 
         function renderBoard(popLevel = null) {
+            syncBannerSize();
             const bannersEl = document.getElementById('solved-banners');
             const gridEl = document.getElementById('tile-grid');
             bannersEl.innerHTML = '';
@@ -617,15 +633,18 @@
             busy = true;
             updateControlsUI();
 
-            // Hop animation on the 4 selected tiles
-            const selectedEls = picked
+            // Hop animation on the 4 selected tiles in visual (top-to-bottom, left-to-right) order
+            const pickedSet = new Set(picked);
+            const selectedEls = unsolvedOrder
+                .filter(id => pickedSet.has(id))
                 .map(id => document.querySelector(`.conn-tile[data-card-id="${id}"]`))
                 .filter(Boolean);
 
             selectedEls.forEach((el, idx) => {
-                setTimeout(() => el.classList.add('hop'), idx * 55);
+                setTimeout(() => el.classList.add('hop'), idx * 80);
             });
 
+            const hopWait = (selectedEls.length - 1) * 80 + 380;
             setTimeout(() => {
                 selectedEls.forEach(el => el.classList.remove('hop'));
 
@@ -633,19 +652,54 @@
                 const allSame = levels.every(l => l === firstLevel);
 
                 if (allSame) {
-                    const pickedSet = new Set(picked);
+                    // Snapshot positions before re-rendering for smooth FLIP glide
+                    const prevTileRects = new Map();
+                    document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
+                        prevTileRects.set(el.dataset.cardId, el.getBoundingClientRect());
+                    });
+
                     solvedLevels.push(firstLevel);
                     unsolvedOrder = unsolvedOrder.filter(id => !pickedSet.has(id));
                     selectedIds.clear();
-                    busy = false;
 
                     renderBoard(firstLevel);
 
-                    if (solvedLevels.length === 4) {
-                        finishGame(true);
-                    } else {
-                        saveProgress();
+                    // Glide remaining tiles smoothly into their new grid slots
+                    const movedEls = [];
+                    document.querySelectorAll('#tile-grid .conn-tile').forEach(el => {
+                        const prev = prevTileRects.get(el.dataset.cardId);
+                        if (!prev) return;
+                        const next = el.getBoundingClientRect();
+                        const dx = prev.left - next.left;
+                        const dy = prev.top - next.top;
+                        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                            el.style.transition = 'none';
+                            el.style.transform = `translate(${dx}px, ${dy}px)`;
+                            movedEls.push(el);
+                        }
+                    });
+                    if (movedEls.length > 0) {
+                        void document.body.offsetWidth;
+                        requestAnimationFrame(() => {
+                            movedEls.forEach(el => {
+                                el.style.transition = 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)';
+                                el.style.transform = '';
+                                el.addEventListener('transitionend', () => {
+                                    el.style.transition = '';
+                                }, { once: true });
+                            });
+                        });
                     }
+
+                    setTimeout(() => {
+                        busy = false;
+                        updateControlsUI();
+                        if (solvedLevels.length === 4) {
+                            finishGame(true);
+                        } else {
+                            saveProgress();
+                        }
+                    }, movedEls.length > 0 ? 380 : 120);
                     return;
                 }
 
@@ -672,12 +726,12 @@
                         showToast('Next time!');
                         finishGame(false);
                     } else {
-                        showToast(isOneAway ? 'One away...' : 'Not quite');
+                        if (isOneAway) showToast('One away...');
                         updateControlsUI();
                         saveProgress();
                     }
                 }, 480);
-            }, 340);
+            }, hopWait);
         }
 
         function winVerdict(m) {
@@ -765,6 +819,7 @@
         });
 
         window.addEventListener('resize', () => {
+            syncBannerSize();
             document.querySelectorAll('#tile-grid .conn-tile:not(.is-image)').forEach(btn => {
                 btn.style.fontSize = `${initialTileFontSize(btn.textContent)}px`;
                 fitTileText(btn);

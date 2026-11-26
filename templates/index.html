@@ -171,6 +171,26 @@
         @media (prefers-color-scheme: dark) {
             .circle-btn { background-color: #3f3f46; color: #f1f5f9; }
         }
+
+        .friends-dock {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+        }
+        @media (prefers-color-scheme: dark) {
+            .friends-dock { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6); }
+        }
+        .friends-dock-item {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .friends-dock-item.active {
+            background-color: #2563eb;
+            color: #ffffff;
+        }
     </style>
 </head>
 <body class="min-h-screen">
@@ -184,24 +204,36 @@
     </div>
 
     <!-- View 2: Friends Tab -->
-    <div id="tab-friends" class="tab-content hidden p-4 max-w-xl mx-auto">
+    <div id="tab-friends" class="tab-content hidden p-4 pb-24 max-w-xl mx-auto">
         <div class="flex items-center justify-between mb-4">
             <h1 class="text-2xl font-black text-slate-900 dark:text-white">Friends Leaderboard</h1>
             <input type="date" id="friends-date-picker" onchange="loadLeaderboard()" class="px-3 py-1.5 border border-slate-300 dark:border-neutral-700 rounded-lg text-sm font-medium bg-white dark:bg-neutral-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
         </div>
 
-        <!-- Puzzle Type Sub-Tabs -->
-        <div class="flex bg-slate-200/80 dark:bg-neutral-800 p-1 rounded-xl mb-4 text-xs font-bold overflow-x-auto">
-            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="flex-1 px-1.5 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition whitespace-nowrap">Crossword</button>
-            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Midi</button>
-            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Mini</button>
-            <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Wordle</button>
-            <button onclick="switchFriendsSubTab('spelling-bee')" id="subtab-spelling-bee" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Bee</button>
-            <button onclick="switchFriendsSubTab('connections')" id="subtab-connections" class="flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap">Connections</button>
-        </div>
-
         <!-- Leaderboard Users List -->
         <div id="leaderboard-list" class="space-y-2.5"></div>
+
+        <!-- Floating Bottom Game-Logo Dock (above main nav) -->
+        <div class="fixed bottom-28 left-1/2 -translate-x-1/2 friends-dock bg-white/90 dark:bg-neutral-800/90 border border-slate-200 dark:border-neutral-700 rounded-2xl p-1.5 flex items-center gap-1.5 z-40 backdrop-blur-md">
+            <button onclick="switchFriendsSubTab('normal')" id="subtab-normal" class="friends-dock-item active text-slate-700 dark:text-slate-300" title="The Crossword">
+                <img src="/static/normal/progress-0.svg" width="24" height="24" alt="Crossword">
+            </button>
+            <button onclick="switchFriendsSubTab('midi')" id="subtab-midi" class="friends-dock-item text-slate-700 dark:text-slate-300" title="The Midi">
+                <img src="/static/midi/progress-0.svg" width="24" height="24" alt="Midi">
+            </button>
+            <button onclick="switchFriendsSubTab('mini')" id="subtab-mini" class="friends-dock-item text-slate-700 dark:text-slate-300" title="The Mini">
+                <img src="/static/mini/progress-0.svg" width="24" height="24" alt="Mini">
+            </button>
+            <button onclick="switchFriendsSubTab('wordle')" id="subtab-wordle" class="friends-dock-item text-slate-700 dark:text-slate-300" title="Wordle">
+                <img src="/static/wordle/progress-0.svg" width="24" height="24" alt="Wordle">
+            </button>
+            <button onclick="switchFriendsSubTab('spelling-bee')" id="subtab-spelling-bee" class="friends-dock-item text-slate-700 dark:text-slate-300" title="Spelling Bee">
+                <img src="/static/spelling-bee/progress-0.svg" width="24" height="24" alt="Spelling Bee">
+            </button>
+            <button onclick="switchFriendsSubTab('connections')" id="subtab-connections" class="friends-dock-item text-slate-700 dark:text-slate-300" title="Connections">
+                <img src="/static/connections/progress-0.svg" width="24" height="24" alt="Connections" onerror="this.onerror=null;this.src=connectionsFallbackIcon('progress-4')">
+            </button>
+        </div>
     </div>
 
     <!-- View 3: User / Account Tab -->
@@ -368,11 +400,7 @@
             currentFriendsSubTab = type;
             ['normal', 'midi', 'mini', 'wordle', 'spelling-bee', 'connections'].forEach(t => {
                 const btn = document.getElementById(`subtab-${t}`);
-                if (t === type) {
-                    btn.className = 'flex-1 px-1.5 py-2 rounded-lg bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 shadow-sm transition whitespace-nowrap';
-                } else {
-                    btn.className = 'flex-1 px-1.5 py-2 rounded-lg text-slate-600 dark:text-neutral-400 transition whitespace-nowrap';
-                }
+                if (btn) btn.classList.toggle('active', t === type);
             });
             loadLeaderboard();
         }
@@ -560,7 +588,7 @@
                     const won = u.usedCheck;
                     const badgeBg = won ? 'bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-900';
                     const m = u.timerSeconds ?? 0;
-                    const mainLabel = won ? (m === 0 ? 'Perfect' : `${m} mistake${m === 1 ? '' : 's'}`) : '4/4 mistakes';
+                    const mainLabel = won ? `${m}/4` : '4/4';
                     const icon = won ? '✓ Won' : '✗ Lost';
                     statusBadge = `
                         <div class="text-right">
@@ -630,7 +658,7 @@
         }
 
         const STAT_SECTIONS = [
-            { id: 'connections', name: 'Connections', color: '#b2a7f9', icon: '/static/connections.svg' },
+            { id: 'connections', name: 'Connections', color: '#b2a7f9', icon: '/static/connections/progress-0.svg' },
             { id: 'wordle',      name: 'Wordle',       color: '#d4d6da', icon: '/static/wordle/progress-0.svg' },
             { id: 'bee',         name: 'Spelling Bee', color: '#f7da21', icon: '/static/spelling-bee/progress-0.svg' },
             { id: 'mini',        name: 'Mini',         color: '#96bdfa', icon: '/static/mini/progress-0.svg' },
@@ -709,18 +737,18 @@
         function renderConnectionsStats(c) {
             const d = c.distribution || {};
             const dist = [
-                { label: '0 err', count: d['0'] || 0 },
-                { label: '1 err', count: d['1'] || 0 },
-                { label: '2 err', count: d['2'] || 0 },
-                { label: '3 err', count: d['3'] || 0 },
-                { label: 'Lost',  count: d['loss'] || 0 },
+                { label: '0', count: d['0'] || 0 },
+                { label: '1', count: d['1'] || 0 },
+                { label: '2', count: d['2'] || 0 },
+                { label: '3', count: d['3'] || 0 },
+                { label: 'Lost', count: d['loss'] || 0 },
             ];
             return statGrid([
                 statTile('Played', String(c.played)),
                 statTile('Won', c.winRate === null ? '--' : `${c.winRate}%`, `${c.wins} of ${c.played}`),
-                statTile('Perfect', c.perfectRate === null ? '--' : `${c.perfectRate}%`, `${c.perfectGames} zero-mistake`),
-                statTile('Avg mistakes', dash(c.avgMistakes), `${c.purpleFirst} purple first`),
-            ], 2) + distBars('Mistake Distribution', dist, '#b2a7f9', 'No finished Connections yet.', 'w-11');
+                statTile('Perfect', c.perfectRate === null ? '--' : `${c.perfectRate}%`),
+                statTile('Avg mistakes', dash(c.avgMistakes), 'per win'),
+            ], 2) + distBars('Mistake Distribution', dist, '#b2a7f9', 'No finished Connections yet.', 'w-8');
         }
 
         function renderWordleStats(w) {
@@ -1047,7 +1075,7 @@
                 // usedCheck: won/lost. timerSeconds is repurposed to hold mistakes (0-4).
                 if (progress.usedCheck) {
                     const m = (progress.timerSeconds != null) ? progress.timerSeconds : 0;
-                    return m === 0 ? 'Perfect' : `${m} err`;
+                    return `${m}/4`;
                 }
                 return 'Lost';
             }

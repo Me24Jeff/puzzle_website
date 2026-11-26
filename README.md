@@ -58,7 +58,7 @@ crossword/
     ├── mini/                    # progress-{0-4}.svg, complete-gold.svg, complete.svg, unavailable.svg
     ├── wordle/                  # progress-{0-5}.svg, complete-won.svg, complete-lost.svg, unavailable.svg
     ├── spelling-bee/            # progress-{0-8}.svg, unavailable.svg
-    ├── connections.svg
+    ├── connections/             # progress-{0-3}.svg, complete-won.svg, complete-lost.svg unavailable.svg
     └── victory.mp3
 ```
 
