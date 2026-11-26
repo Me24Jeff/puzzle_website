@@ -321,7 +321,9 @@
 
         // --- Valid guess dictionary (fetched once, cached in memory) ---
         let VALID_WORDS = null;
+        let validWordsLoading = false;
         async function loadValidWords() {
+            validWordsLoading = true;
             try {
                 // Served with a long Cache-Control + ETag, so after the first
                 // visit this is answered from the browser cache.
@@ -333,7 +335,9 @@
                 );
             } catch (e) {
                 console.error("Error loading valid word list:", e);
-                VALID_WORDS = new Set(); // fail closed: only TARGET will be accepted
+                VALID_WORDS = null; // stay "not loaded" so the next Enter retries
+            } finally {
+                validWordsLoading = false;
             }
         }
         loadValidWords();
@@ -579,6 +583,7 @@
 
             if (VALID_WORDS === null) {
                 showToast("Still loading dictionary…");
+                if (!validWordsLoading) loadValidWords();
                 return;
             }
             if (guess !== TARGET && !VALID_WORDS.has(guess)) {

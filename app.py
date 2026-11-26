@@ -132,6 +132,8 @@ TYPE_FOLDER_CONFIG = {
     'connections':  {'publisher': CONNECTIONS_PUBLISHER, 'suffix': '',},
 }
 
+KNOWN_PUBLISHERS = {c['publisher'] for c in TYPE_FOLDER_CONFIG.values()}
+
 for _d in (CROSSWORDS_DIR, SPELLING_BEE_DIR, CONNECTIONS_DIR):
     os.makedirs(_d, exist_ok=True)
 
@@ -186,7 +188,7 @@ def valid_password(pw):
 
 
 def valid_progress_key(publisher, year, month, day_key):
-    return bool(_SAFE_NAME_RE.match(publisher) and _YEAR_RE.match(year)
+    return bool(publisher in KNOWN_PUBLISHERS and _YEAR_RE.match(year)
                 and _MONTH_RE.match(month) and _SAFE_DAY_KEY_RE.match(day_key))
 
 
@@ -713,6 +715,14 @@ def change_username():
         return jsonify({'error': err}), 400
 
     user_id = session['user_id']
+    # Admin rights follow the username in ADMIN_USERNAMES (applied at startup).
+    # If an admin could rename, their old name would be free for anyone to
+    # register and become admin on the next restart; likewise nobody may
+    # rename themselves *to* an admin name.
+    if is_admin(user_id):
+        return jsonify({'error': 'Admins cannot rename; change ADMIN_USERNAMES instead'}), 403
+    if new_username.lower() in ADMIN_USERNAMES:
+        return jsonify({'error': 'That username is reserved'}), 400
     with db() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?', (new_username, user_id))

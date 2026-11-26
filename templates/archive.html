@@ -563,6 +563,7 @@
                 let isUnavailable = isFuture;
                 if (currentCategory === 'wordle' && wordleRange && wordleRange.startDate) {
                     if (dateKey < wordleRange.startDate) isUnavailable = true;
+                    if (wordleRange.endDate && dateKey > wordleRange.endDate) isUnavailable = true;
                 } else if (currentCategory === 'wordle' && wordleRange && !wordleRange.startDate) {
                     isUnavailable = true; // empty word list
                 } else if (availableDaysThisMonth !== null && !isUnavailable) {

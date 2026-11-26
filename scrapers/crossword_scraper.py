@@ -401,12 +401,15 @@ def main():
     session = build_session(cookie)
 
     ok_count, fail_count = 0, 0
-    first = True
+    fetched_any = False
     for target_date in daterange(start, end):
         for puzzle_type in types:
-            if not first:
-                time.sleep(args.delay)
-            first = False
+            will_skip = (not args.force) and os.path.exists(
+                output_path(args.output_dir, puzzle_type, target_date))
+            if not will_skip:
+                if fetched_any:
+                    time.sleep(args.delay)
+                fetched_any = True
             if scrape_one(session, puzzle_type, target_date, args.output_dir, force=args.force):
                 ok_count += 1
             else:

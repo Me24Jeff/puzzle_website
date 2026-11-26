@@ -81,11 +81,11 @@ there, `app.py`'s relative paths (`"puzzles/xwords"`,
 
 | When | Script | What |
 |---|---|---|
-| 22:10 Tuesday - Saturday, 18:10 Saturday - Monday| `crosswords_daily.sh` | NYT Daily/Mini/Midi crosswords (only if `NYT_S_COOKIE` is set)
+| 18:10 Sat & Sun, 22:10 Mon - Fri | `crosswords_daily.sh` | NYT Daily/Mini/Midi crosswords (only if `NYT_S_COOKIE` is set)
 | 18:10 daily | `wordle_daily.sh` | Wordle |
 | 18:10 daily | `connections_daily.sh` | Connections |
 | 03:10 daily | `spelling_bee_daily.sh` | Spelling Bee |
-| 13:00 Sundays | `weekly_xwords_pull.sh` | `git pull`s your archive repo |
+| 13:00 Sundays (currently commented out in docker/crontab) | `weekly_xwords_pull.sh` | `git pull`s your archive repo |
 
 ## 4. First-time setup
 

@@ -1,3 +1,11 @@
 .env
 __pycache__/
 *.pyc
+
+.env.runtime
+.flask_secret_key
+*.db
+*.db-wal
+*.db-shm
+logs/
+nyt_cookies.json

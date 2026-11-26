@@ -356,7 +356,7 @@
             const greetingElement = document.getElementById('greeting');
             let prefix = "Good Evening";
 
-            if (4 < currentHour && currentHour < 12) {
+            if (4 <= currentHour && currentHour < 12) {
                 prefix = "Good Morning";
             } else if (12 <= currentHour && currentHour < 17) {
                 prefix = "Good Afternoon";
